@@ -17,9 +17,10 @@ class Base(DeclarativeBase):
 
 
 # Create async engine
+# Note: echo=False to disable SQL logging; use app.services.upload logger for debug logs
 engine = create_async_engine(
     str(settings.DATABASE_URL),
-    echo=settings.DEBUG,
+    echo=False,
     pool_pre_ping=True,
     pool_size=10,
     max_overflow=20,

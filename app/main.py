@@ -20,6 +20,15 @@ logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
+
+# Suppress noisy SQLAlchemy and other library logs
+logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+logging.getLogger("aiosqlite").setLevel(logging.WARNING)
+logging.getLogger("asyncpg").setLevel(logging.WARNING)
+logging.getLogger("python_multipart").setLevel(logging.WARNING)
+logging.getLogger("python_multipart.multipart").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 

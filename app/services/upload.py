@@ -1,5 +1,6 @@
 """Upload processing service for Excel files."""
 
+import logging
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
@@ -15,6 +16,9 @@ from app.models.attendance import AttendanceRecord, AttendanceStatus
 from app.models.exam import ExamRecord
 from app.models.upload import Upload, UploadError as UploadErrorModel, UploadStatus, UploadType
 from app.schemas.upload import UploadErrorResponse, UploadResult
+
+# Setup debug logger
+logger = logging.getLogger(__name__)
 
 
 class UploadService:
@@ -34,6 +38,9 @@ class UploadService:
         Process attendance Excel upload.
         Allows partial success - invalid rows are skipped.
         """
+        logger.info(f"[ATTENDANCE UPLOAD] Starting upload for file: {file_name}, project: {project_id}, user: {user_id}")
+        logger.debug(f"[ATTENDANCE UPLOAD] File size: {len(file_content)} bytes")
+        
         # Create upload record
         upload = Upload(
             project_id=project_id,
@@ -46,21 +53,26 @@ class UploadService:
         )
         self.db.add(upload)
         await self.db.flush()
+        logger.debug(f"[ATTENDANCE UPLOAD] Created upload record with ID: {upload.id}")
 
         try:
             # Parse Excel file
             rows = self._parse_excel(file_content)
             upload.total_rows = len(rows)
+            logger.info(f"[ATTENDANCE UPLOAD] Parsed {len(rows)} data rows from Excel")
 
             errors: list[UploadErrorModel] = []
             successful = 0
 
             for row_num, row in enumerate(rows, start=2):  # Start at 2 (header is 1)
+                logger.debug(f"[ATTENDANCE UPLOAD] Processing row {row_num}: {row}")
                 try:
                     record = self._validate_attendance_row(row, row_num, project_id, upload.id)
                     self.db.add(record)
                     successful += 1
+                    logger.debug(f"[ATTENDANCE UPLOAD] Row {row_num} SUCCESS - Created record: student_id={record.student_id}, student_name={record.student_name}, date={record.attendance_date}, status={record.status}")
                 except ValidationError as e:
+                    logger.warning(f"[ATTENDANCE UPLOAD] Row {row_num} FAILED - {e.message} (column={e.details.get('column')}, value={e.details.get('value')})")
                     error = UploadErrorModel(
                         upload_id=upload.id,
                         row_number=row_num,
@@ -81,7 +93,10 @@ class UploadService:
             )
             upload.processing_completed_at = datetime.now(timezone.utc)
 
+            logger.info(f"[ATTENDANCE UPLOAD] Upload complete - Status: {upload.status.value}, Successful: {successful}, Failed: {len(errors)}, Total: {upload.total_rows}")
+            
             await self.db.flush()
+            logger.debug(f"[ATTENDANCE UPLOAD] Database flush completed - records should be persisted")
 
             return UploadResult(
                 upload_id=upload.id,
@@ -231,22 +246,31 @@ class UploadService:
                 raise UploadError("Excel file has no active sheet")
 
             rows = list(sheet.iter_rows(values_only=True))
+            logger.debug(f"[EXCEL PARSE] Total raw rows in Excel (including header): {len(rows)}")
+            
             if len(rows) < 2:
                 raise UploadError("Excel file must have a header row and at least one data row")
 
             # First row is headers
             headers = [str(h).strip().lower() if h else "" for h in rows[0]]
+            logger.debug(f"[EXCEL PARSE] Detected headers: {headers}")
 
             # Convert remaining rows to dictionaries
             data = []
-            for row in rows[1:]:
+            skipped_empty_rows = 0
+            for row_idx, row in enumerate(rows[1:], start=2):
                 row_dict = {}
                 for i, value in enumerate(row):
                     if i < len(headers) and headers[i]:
                         row_dict[headers[i]] = value
                 if any(row_dict.values()):  # Skip empty rows
                     data.append(row_dict)
+                    logger.debug(f"[EXCEL PARSE] Row {row_idx} extracted: {row_dict}")
+                else:
+                    skipped_empty_rows += 1
+                    logger.debug(f"[EXCEL PARSE] Row {row_idx} SKIPPED (all values empty): {row}")
 
+            logger.info(f"[EXCEL PARSE] Summary: {len(data)} data rows extracted, {skipped_empty_rows} empty rows skipped")
             return data
 
         except Exception as e:
@@ -262,8 +286,11 @@ class UploadService:
         upload_id: UUID,
     ) -> AttendanceRecord:
         """Validate and create attendance record from row."""
+        logger.debug(f"[VALIDATE ROW {row_num}] Input data: {row}")
+        
         # Required fields
         student_id = row.get("student_id")
+        logger.debug(f"[VALIDATE ROW {row_num}] student_id raw value: {student_id!r} (type: {type(student_id).__name__})")
         if not student_id:
             raise ValidationError(
                 "Student ID is required",
@@ -271,6 +298,7 @@ class UploadService:
             )
 
         student_name = row.get("student_name")
+        logger.debug(f"[VALIDATE ROW {row_num}] student_name raw value: {student_name!r} (type: {type(student_name).__name__})")
         if not student_name:
             raise ValidationError(
                 "Student name is required",
@@ -279,6 +307,7 @@ class UploadService:
 
         # Parse date
         date_value = row.get("attendance_date")
+        logger.debug(f"[VALIDATE ROW {row_num}] attendance_date raw value: {date_value!r} (type: {type(date_value).__name__})")
         if not date_value:
             raise ValidationError(
                 "Attendance date is required",
@@ -288,12 +317,14 @@ class UploadService:
         try:
             if isinstance(date_value, datetime):
                 attendance_date = date_value.date()
+                logger.debug(f"[VALIDATE ROW {row_num}] Parsed datetime -> date: {attendance_date}")
             elif isinstance(date_value, str):
                 from datetime import date
                 # Try common formats
                 for fmt in ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y"]:
                     try:
                         attendance_date = datetime.strptime(date_value, fmt).date()
+                        logger.debug(f"[VALIDATE ROW {row_num}] Parsed string with format '{fmt}' -> date: {attendance_date}")
                         break
                     except ValueError:
                         continue
@@ -301,6 +332,7 @@ class UploadService:
                     raise ValueError("Unknown date format")
             else:
                 attendance_date = date_value
+                logger.debug(f"[VALIDATE ROW {row_num}] Using date value as-is: {attendance_date} (type: {type(date_value).__name__})")
         except Exception:
             raise ValidationError(
                 f"Invalid date format: {date_value}",
@@ -309,6 +341,7 @@ class UploadService:
 
         # Parse status
         status_value = str(row.get("status", "")).lower().strip()
+        logger.debug(f"[VALIDATE ROW {row_num}] status raw value: {row.get('status')!r} -> normalized: '{status_value}'")
         try:
             status = AttendanceStatus(status_value)
         except ValueError:
@@ -317,15 +350,21 @@ class UploadService:
                 details={"column": "status", "row": row_num, "value": status_value},
             )
 
-        return AttendanceRecord(
+        remarks = str(row.get("remarks", "")).strip() if row.get("remarks") else None
+        logger.debug(f"[VALIDATE ROW {row_num}] remarks: {remarks!r}")
+        
+        record = AttendanceRecord(
             project_id=project_id,
             student_id=str(student_id).strip(),
             student_name=str(student_name).strip(),
             attendance_date=attendance_date,
             status=status,
-            remarks=str(row.get("remarks", "")).strip() if row.get("remarks") else None,
+            remarks=remarks,
             upload_id=upload_id,
         )
+        
+        logger.debug(f"[VALIDATE ROW {row_num}] Created AttendanceRecord: student_id={record.student_id}, student_name={record.student_name}, date={record.attendance_date}, status={record.status}")
+        return record
 
     def _validate_exam_row(
         self,
