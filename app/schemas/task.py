@@ -1,0 +1,134 @@
+"""Task schemas with timer support."""
+
+from datetime import date, datetime
+
+from pydantic import Field
+
+from app.models.task import TaskStatus
+from app.schemas.common import BaseSchema
+
+
+# Task Category schemas
+class TaskCategoryCreate(BaseSchema):
+    """Task category creation schema."""
+
+    name: str = Field(..., min_length=2, max_length=100)
+    description: str | None = None
+
+
+class TaskCategoryUpdate(BaseSchema):
+    """Task category update schema."""
+
+    name: str | None = Field(None, min_length=2, max_length=100)
+    description: str | None = None
+
+
+class TaskCategoryResponse(BaseSchema):
+    """Task category response schema."""
+
+    id: int
+    project_id: int
+    name: str
+    description: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+# Task schemas
+class TaskCreate(BaseSchema):
+    """Task creation schema."""
+
+    title: str = Field(..., min_length=2, max_length=255)
+    description: str | None = None
+    category_id: int | None = None
+    due_date: date | None = None
+    assigned_to_user_id: int | None = None  # Optional - for assigning to another user
+    assigned_to_role_id: int | None = None  # Optional - for assigning to a role
+
+
+class TaskUpdate(BaseSchema):
+    """Task update schema."""
+
+    title: str | None = Field(None, min_length=2, max_length=255)
+    description: str | None = None
+    category_id: int | None = None
+    status: TaskStatus | None = None
+    due_date: date | None = None
+    assigned_to_user_id: int | None = None
+    assigned_to_role_id: int | None = None
+
+
+class TaskStartStop(BaseSchema):
+    """Schema for starting/stopping task timer."""
+
+    action: str = Field(..., pattern="^(start|stop)$")
+
+
+class TaskResponse(BaseSchema):
+    """Task response schema."""
+
+    id: int
+    project_id: int
+    category_id: int | None
+    title: str
+    description: str | None
+    status: TaskStatus
+    start_time: datetime | None
+    end_time: datetime | None
+    due_date: date | None
+    assigned_to_user_id: int | None
+    assigned_to_role_id: int | None
+    auto_rule_key: str | None
+    created_by_id: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class TaskWithDetails(TaskResponse):
+    """Task response with related details and computed fields."""
+
+    category_name: str | None = None
+    assigned_user_name: str | None = None
+    assigned_role_name: str | None = None
+    created_by_name: str | None = None
+    is_overdue: bool = False
+    time_remaining_seconds: int | None = None  # Seconds until due_date (negative if overdue)
+    elapsed_seconds: int | None = None  # Time elapsed since start_time
+
+
+class TaskStatusUpdate(BaseSchema):
+    """Quick status update schema."""
+
+    status: TaskStatus
+
+
+class TaskFilter(BaseSchema):
+    """Task filtering options."""
+
+    status: TaskStatus | None = None
+    category_id: int | None = None
+    assigned_to_user_id: int | None = None
+    assigned_to_role_id: int | None = None
+    is_overdue: bool | None = None
+    due_before: date | None = None
+    due_after: date | None = None
+
+
+class TasksGroupedByCategory(BaseSchema):
+    """Tasks grouped by category for display."""
+
+    category_id: int | None
+    category_name: str | None
+    tasks: list[TaskWithDetails]
+
+
+class StaffTasksSummary(BaseSchema):
+    """Summary of tasks for a staff member."""
+
+    user_id: int
+    user_name: str
+    pending_count: int
+    in_progress_count: int
+    overdue_count: int
+    completed_today_count: int
+    tasks: list[TaskWithDetails]
