@@ -52,8 +52,8 @@ class ExamRecord(Base, IDMixin, TimestampMixin, ProjectScopedMixin):
 
     __table_args__ = (
         UniqueConstraint(
-            "project_id", "student_id", "exam_name", "subject",
-            name="uq_exam_student_subject",
+            "project_id", "student_id", "exam_name", "subject", "exam_date",
+            name="uq_exam_student_subject_date",
         ),
     )
 

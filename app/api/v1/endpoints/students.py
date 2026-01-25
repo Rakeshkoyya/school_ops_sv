@@ -58,14 +58,29 @@ async def list_students(
     context: Annotated[ProjectContext, Depends(require_permission("student:view"))],
     db: Annotated[AsyncSession, Depends(get_db)],
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100),
+    page_size: int = Query(50, ge=1, le=500),
     class_name: str | None = None,
     section: str | None = None,
+    class_section: str | None = None,
     search: str | None = None,
 ):
-    """List students with filtering and pagination."""
+    """List students with filtering and pagination.
+    
+    class_section parameter accepts format like "3-A" and parses into class_name and section.
+    """
     service = StudentService(db)
-    filters = StudentFilter(class_name=class_name, section=section, search=search)
+    
+    # Parse class_section if provided (e.g., "3-A" -> class_name="3", section="A")
+    filter_class_name = class_name
+    filter_section = section
+    if class_section and "-" in class_section:
+        parts = class_section.rsplit("-", 1)
+        filter_class_name = parts[0]
+        filter_section = parts[1]
+    elif class_section:
+        filter_class_name = class_section
+    
+    filters = StudentFilter(class_name=filter_class_name, section=filter_section, search=search)
     return await service.list_students(context.project_id, filters, page, page_size)
 
 
