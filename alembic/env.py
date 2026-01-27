@@ -6,6 +6,9 @@ from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 
+# Import settings to get DATABASE_URL from .env
+from app.core.config import settings
+
 # Import all models to ensure they are registered with Base.metadata
 from app.core.database import Base
 from app.models import (
@@ -28,6 +31,9 @@ from app.models import (
 
 # this is the Alembic Config object
 config = context.config
+
+# Set sqlalchemy.url from environment variable loaded via pydantic settings
+config.set_main_option("sqlalchemy.url", str(settings.DATABASE_URL))
 
 # Interpret the config file for Python logging.
 if config.config_file_name is not None:

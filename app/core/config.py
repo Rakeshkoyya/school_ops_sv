@@ -23,8 +23,8 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     API_V1_PREFIX: str = "/api/v1"
 
-    # Database
-    DATABASE_URL: PostgresDsn = "postgresql://postgres:postgres@localhost:5434/school_agent1"
+    # Database - loaded from DATABASE_URL in .env file
+    DATABASE_URL: PostgresDsn
 
     # JWT Settings
     JWT_SECRET_KEY: str = "your-super-secret-key-change-in-production"
