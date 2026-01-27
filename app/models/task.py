@@ -48,6 +48,7 @@ class TaskCategory(Base, IDMixin, TimestampMixin, ProjectScopedMixin):
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    color: Mapped[str | None] = mapped_column(String(20), nullable=True)  # Hex color like #FF5733
 
     # Relationships
     tasks: Mapped[list["Task"]] = relationship(

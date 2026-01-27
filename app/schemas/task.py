@@ -14,6 +14,7 @@ class TaskCategoryCreate(BaseSchema):
 
     name: str = Field(..., min_length=2, max_length=100)
     description: str | None = None
+    color: str | None = Field(None, max_length=20)  # Hex color like #FF5733
 
 
 class TaskCategoryUpdate(BaseSchema):
@@ -21,6 +22,7 @@ class TaskCategoryUpdate(BaseSchema):
 
     name: str | None = Field(None, min_length=2, max_length=100)
     description: str | None = None
+    color: str | None = Field(None, max_length=20)
 
 
 class TaskCategoryResponse(BaseSchema):
@@ -30,6 +32,7 @@ class TaskCategoryResponse(BaseSchema):
     project_id: int
     name: str
     description: str | None
+    color: str | None
     created_at: datetime
     updated_at: datetime
 
