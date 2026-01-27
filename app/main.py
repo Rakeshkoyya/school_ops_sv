@@ -24,8 +24,6 @@ logging.basicConfig(
 # Suppress noisy SQLAlchemy and other library logs
 logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
 logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
-logging.getLogger("aiosqlite").setLevel(logging.WARNING)
-logging.getLogger("asyncpg").setLevel(logging.WARNING)
 logging.getLogger("python_multipart").setLevel(logging.WARNING)
 logging.getLogger("python_multipart.multipart").setLevel(logging.WARNING)
 
@@ -38,7 +36,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
     yield
     logger.info("Shutting down application")
-    await engine.dispose()
+    engine.dispose()
 
 
 def create_application() -> FastAPI:

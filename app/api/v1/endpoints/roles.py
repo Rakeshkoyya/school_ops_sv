@@ -4,7 +4,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import CurrentUser, ProjectContext, require_role_admin
@@ -32,23 +32,23 @@ router = APIRouter()
 
 # Permission endpoints
 @router.get("/permissions", response_model=list[PermissionResponse])
-async def list_permissions(
+def list_permissions(
     context: ProjectContext,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     List all available permissions.
     """
     service = RBACService(db)
-    return await service.list_permissions()
+    return service.list_permissions()
 
 
 # Role endpoints
 @router.post("", response_model=RoleWithPermissions)
-async def create_role(
+def create_role(
     request: RoleCreate,
     context: Annotated[ProjectContext, Depends(require_role_admin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -56,11 +56,11 @@ async def create_role(
     Requires role admin access.
     """
     service = RBACService(db)
-    role = await service.create_role(context.project_id, request)
+    role = service.create_role(context.project_id, request)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.ROLE_CREATED,
         resource_type="role",
         resource_id=str(role.id),
@@ -74,10 +74,10 @@ async def create_role(
 
 
 @router.post("/admin", response_model=RoleWithPermissions)
-async def create_role_admin(
+def create_role_admin(
     request: RoleCreate,
     user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -91,11 +91,11 @@ async def create_role_admin(
         raise PermissionDeniedError("project_id is required for super admin role creation")
     
     service = RBACService(db)
-    role = await service.create_role(request.project_id, request)
+    role = service.create_role(request.project_id, request)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.ROLE_CREATED,
         resource_type="role",
         resource_id=str(role.id),
@@ -109,9 +109,9 @@ async def create_role_admin(
 
 
 @router.get("/all", response_model=list[RoleWithPermissionsAndProject])
-async def list_all_roles(
+def list_all_roles(
     user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     List all roles across all projects.
@@ -121,41 +121,41 @@ async def list_all_roles(
         raise PermissionDeniedError("Super admin access required")
     
     service = RBACService(db)
-    roles = await service.list_all_roles()
+    roles = service.list_all_roles()
     return roles
 
 
 @router.get("", response_model=list[RoleResponse])
-async def list_roles(
+def list_roles(
     context: ProjectContext,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     List all roles for the project.
     """
     service = RBACService(db)
-    return await service.list_roles(context.project_id)
+    return service.list_roles(context.project_id)
 
 
 @router.get("/{role_id}", response_model=RoleWithPermissions)
-async def get_role(
+def get_role(
     role_id: UUID,
     context: ProjectContext,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     Get role details with permissions.
     """
     service = RBACService(db)
-    return await service.get_role_with_permissions(role_id, context.project_id)
+    return service.get_role_with_permissions(role_id, context.project_id)
 
 
 @router.patch("/{role_id}", response_model=RoleResponse)
-async def update_role(
+def update_role(
     role_id: UUID,
     request: RoleUpdate,
     context: Annotated[ProjectContext, Depends(require_role_admin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -163,11 +163,11 @@ async def update_role(
     Requires role admin access.
     """
     service = RBACService(db)
-    role = await service.update_role(role_id, context.project_id, request)
+    role = service.update_role(role_id, context.project_id, request)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.ROLE_UPDATED,
         resource_type="role",
         resource_id=str(role_id),
@@ -182,11 +182,11 @@ async def update_role(
 
 
 @router.patch("/admin/{role_id}", response_model=RoleResponse)
-async def update_role_admin(
+def update_role_admin(
     role_id: int,
     request: RoleUpdate,
     user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -200,11 +200,11 @@ async def update_role_admin(
         raise PermissionDeniedError("project_id is required for super admin role update")
     
     service = RBACService(db)
-    role = await service.update_role(role_id, request.project_id, request)
+    role = service.update_role(role_id, request.project_id, request)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.ROLE_UPDATED,
         resource_type="role",
         resource_id=str(role_id),
@@ -219,10 +219,10 @@ async def update_role_admin(
 
 
 @router.delete("/{role_id}", response_model=MessageResponse)
-async def delete_role(
+def delete_role(
     role_id: UUID,
     context: Annotated[ProjectContext, Depends(require_role_admin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -231,11 +231,11 @@ async def delete_role(
     Requires role admin access.
     """
     service = RBACService(db)
-    await service.delete_role(role_id, context.project_id)
+    service.delete_role(role_id, context.project_id)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.ROLE_DELETED,
         resource_type="role",
         resource_id=str(role_id),
@@ -248,11 +248,11 @@ async def delete_role(
 
 
 @router.delete("/admin/{role_id}", response_model=MessageResponse)
-async def delete_role_admin(
+def delete_role_admin(
     role_id: int,
     project_id: int,
     user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -264,11 +264,11 @@ async def delete_role_admin(
         raise PermissionDeniedError("Super admin access required")
     
     service = RBACService(db)
-    await service.delete_role(role_id, project_id)
+    service.delete_role(role_id, project_id)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.ROLE_DELETED,
         resource_type="role",
         resource_id=str(role_id),
@@ -281,11 +281,11 @@ async def delete_role_admin(
 
 
 @router.put("/{role_id}/permissions", response_model=RoleWithPermissions)
-async def assign_permissions_to_role(
+def assign_permissions_to_role(
     role_id: UUID,
     request: RolePermissionAssign,
     context: Annotated[ProjectContext, Depends(require_role_admin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -293,7 +293,7 @@ async def assign_permissions_to_role(
     Requires role admin access.
     """
     service = RBACService(db)
-    role = await service.assign_permissions_to_role(
+    role = service.assign_permissions_to_role(
         role_id,
         context.project_id,
         request.permission_ids,
@@ -301,7 +301,7 @@ async def assign_permissions_to_role(
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.PERMISSION_GRANTED,
         resource_type="role",
         resource_id=str(role_id),
@@ -317,10 +317,10 @@ async def assign_permissions_to_role(
 
 # User-Role assignment endpoints
 @router.post("/users/bulk-assign", response_model=MessageResponse)
-async def bulk_assign_user_roles(
+def bulk_assign_user_roles(
     request: BulkUserRoleAssign,
     user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -331,11 +331,11 @@ async def bulk_assign_user_roles(
         raise PermissionDeniedError("Super admin access required")
 
     service = RBACService(db)
-    result = await service.bulk_assign_user_roles(request)
+    result = service.bulk_assign_user_roles(request)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.ROLE_ASSIGNED,
         resource_type="user_role_bulk",
         user_id=user.id,
@@ -354,22 +354,22 @@ async def bulk_assign_user_roles(
 
 
 @router.get("/users", response_model=list[UserWithRoles])
-async def list_project_users(
+def list_project_users(
     context: ProjectContext,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     List all users in the project with their roles.
     """
     service = RBACService(db)
-    return await service.list_project_users(context.project_id)
+    return service.list_project_users(context.project_id)
 
 
 @router.post("/users", response_model=UserRoleResponse)
-async def assign_user_to_role(
+def assign_user_to_role(
     request: UserRoleAssign,
     context: Annotated[ProjectContext, Depends(require_role_admin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -377,11 +377,11 @@ async def assign_user_to_role(
     Requires role admin access.
     """
     service = RBACService(db)
-    assignment = await service.assign_user_to_role(context.project_id, request)
+    assignment = service.assign_user_to_role(context.project_id, request)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.ROLE_ASSIGNED,
         resource_type="user_role",
         resource_id=str(assignment.id),
@@ -399,11 +399,11 @@ async def assign_user_to_role(
 
 
 @router.delete("/users/{user_id}/roles/{role_id}", response_model=MessageResponse)
-async def revoke_user_role(
+def revoke_user_role(
     user_id: UUID,
     role_id: UUID,
     context: Annotated[ProjectContext, Depends(require_role_admin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -411,11 +411,11 @@ async def revoke_user_role(
     Requires role admin access.
     """
     service = RBACService(db)
-    await service.revoke_user_role(context.project_id, user_id, role_id)
+    service.revoke_user_role(context.project_id, user_id, role_id)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.ROLE_REVOKED,
         resource_type="user_role",
         project_id=context.project_id,

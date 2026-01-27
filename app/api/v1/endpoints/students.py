@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 from io import BytesIO
 
 from app.core.config import settings
@@ -28,19 +28,19 @@ router = APIRouter()
 
 
 @router.post("", response_model=StudentResponse)
-async def create_student(
+def create_student(
     request: StudentCreate,
     context: Annotated[ProjectContext, Depends(require_permission("student:create"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """Create a new student."""
     service = StudentService(db)
-    student = await service.create_student(context.project_id, request)
+    student = service.create_student(context.project_id, request)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.DATA_CREATED,
         resource_type="student",
         resource_id=str(student.id),
@@ -54,9 +54,9 @@ async def create_student(
 
 
 @router.get("", response_model=PaginatedStudentResponse)
-async def list_students(
+def list_students(
     context: Annotated[ProjectContext, Depends(require_permission("student:view"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
     class_name: str | None = None,
@@ -81,13 +81,13 @@ async def list_students(
         filter_class_name = class_section
     
     filters = StudentFilter(class_name=filter_class_name, section=filter_section, search=search)
-    return await service.list_students(context.project_id, filters, page, page_size)
+    return service.list_students(context.project_id, filters, page, page_size)
 
 
 @router.get("/template")
-async def download_student_template(
+def download_student_template(
     context: Annotated[ProjectContext, Depends(require_permission("student:upload"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """Download Excel template for student bulk upload."""
     service = StudentService(db)
@@ -101,42 +101,42 @@ async def download_student_template(
 
 
 @router.get("/classes")
-async def get_class_sections(
+def get_class_sections(
     context: Annotated[ProjectContext, Depends(require_permission("student:view"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """Get distinct class-section combinations for the project."""
     service = StudentService(db)
-    return await service.get_class_sections(context.project_id)
+    return service.get_class_sections(context.project_id)
 
 
 @router.get("/{student_id}", response_model=StudentResponse)
-async def get_student(
+def get_student(
     student_id: int,
     context: Annotated[ProjectContext, Depends(require_permission("student:view"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """Get a student by ID."""
     service = StudentService(db)
-    student = await service.get_student(context.project_id, student_id)
+    student = service.get_student(context.project_id, student_id)
     return StudentResponse.model_validate(student)
 
 
 @router.patch("/{student_id}", response_model=StudentResponse)
-async def update_student(
+def update_student(
     student_id: int,
     request: StudentUpdate,
     context: Annotated[ProjectContext, Depends(require_permission("student:update"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """Update a student."""
     service = StudentService(db)
-    student = await service.update_student(context.project_id, student_id, request)
+    student = service.update_student(context.project_id, student_id, request)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.DATA_UPDATED,
         resource_type="student",
         resource_id=str(student_id),
@@ -151,19 +151,19 @@ async def update_student(
 
 
 @router.delete("/{student_id}", response_model=MessageResponse)
-async def delete_student(
+def delete_student(
     student_id: int,
     context: Annotated[ProjectContext, Depends(require_permission("student:delete"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """Delete a student."""
     service = StudentService(db)
-    await service.delete_student(context.project_id, student_id)
+    service.delete_student(context.project_id, student_id)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.DATA_DELETED,
         resource_type="student",
         resource_id=str(student_id),
@@ -176,9 +176,9 @@ async def delete_student(
 
 
 @router.post("/upload", response_model=StudentBulkUploadResult)
-async def bulk_upload_students(
+def bulk_upload_students(
     context: Annotated[ProjectContext, Depends(require_permission("student:upload"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
     file: UploadFile = File(...),
 ):
@@ -195,16 +195,16 @@ async def bulk_upload_students(
     if not file.filename.endswith(".xlsx"):
         raise UploadError("Only .xlsx files are allowed")
 
-    content = await file.read()
+    content = file.file.read()
     if len(content) > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
         raise UploadError(f"File size exceeds {settings.MAX_UPLOAD_SIZE_MB}MB limit")
 
     service = StudentService(db)
-    result = await service.bulk_upload(context.project_id, content)
+    result = service.bulk_upload(context.project_id, content)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.UPLOAD_COMPLETED,
         resource_type="student_upload",
         project_id=context.project_id,

@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -33,10 +33,10 @@ router = APIRouter()
 
 
 @router.post("", response_model=ExamRecordResponse)
-async def create_exam_record(
+def create_exam_record(
     request: ExamRecordCreate,
     context: Annotated[ProjectContext, Depends(require_permission("exam:create"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -45,11 +45,11 @@ async def create_exam_record(
     Requires exam:create permission.
     """
     service = ExamService(db)
-    record = await service.create_record(context.project_id, request)
+    record = service.create_record(context.project_id, request)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.DATA_CREATED,
         resource_type="exam",
         resource_id=str(record.id),
@@ -63,9 +63,9 @@ async def create_exam_record(
 
 
 @router.get("", response_model=PaginatedResponse[ExamRecordResponse])
-async def list_exam_records(
+def list_exam_records(
     context: Annotated[ProjectContext, Depends(require_permission("exam:view"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     student_id: int | None = None,
     class_section: str | None = None,
     class_name: str | None = None,
@@ -96,7 +96,7 @@ async def list_exam_records(
         month=month,
         year=year,
     )
-    records, total = await service.list_records(
+    records, total = service.list_records(
         context.project_id,
         filters=filters,
         page=page,
@@ -113,9 +113,9 @@ async def list_exam_records(
 
 
 @router.get("/summary", response_model=ExamSummary)
-async def get_exam_summary(
+def get_exam_summary(
     context: Annotated[ProjectContext, Depends(require_permission("exam:view"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     exam_name: str = Query(...),
     subject: str = Query(...),
 ):
@@ -124,7 +124,7 @@ async def get_exam_summary(
     Requires exam:view permission.
     """
     service = ExamService(db)
-    return await service.get_exam_summary(
+    return service.get_exam_summary(
         context.project_id,
         exam_name=exam_name,
         subject=subject,
@@ -132,20 +132,20 @@ async def get_exam_summary(
 
 
 @router.get("/class-sections")
-async def get_class_sections(
+def get_class_sections(
     context: Annotated[ProjectContext, Depends(require_permission("exam:view"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     Get distinct class-section combinations with student counts.
     Requires exam:view permission.
     """
     service = ExamService(db)
-    return await service.get_class_sections(context.project_id)
+    return service.get_class_sections(context.project_id)
 
 
 @router.get("/subjects")
-async def get_subjects(
+def get_subjects(
     context: Annotated[ProjectContext, Depends(require_permission("exam:view"))],
 ):
     """
@@ -156,22 +156,22 @@ async def get_subjects(
 
 
 @router.get("/exam-names")
-async def get_exam_names(
+def get_exam_names(
     context: Annotated[ProjectContext, Depends(require_permission("exam:view"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     Get list of distinct exam names for the project.
     Requires exam:view permission.
     """
     service = ExamService(db)
-    return await service.get_exam_names(context.project_id)
+    return service.get_exam_names(context.project_id)
 
 
 @router.get("/by-class", response_model=ExamByClassResponse)
-async def get_exam_by_class(
+def get_exam_by_class(
     context: Annotated[ProjectContext, Depends(require_permission("exam:view"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     class_section: str = Query(..., description="Class-section like '3-A'"),
     exam_name: str = Query(..., description="Exam name"),
     subject: str = Query(..., description="Subject"),
@@ -182,7 +182,7 @@ async def get_exam_by_class(
     Requires exam:view permission.
     """
     service = ExamService(db)
-    return await service.get_exam_by_class(
+    return service.get_exam_by_class(
         context.project_id,
         class_section=class_section,
         exam_name=exam_name,
@@ -191,9 +191,9 @@ async def get_exam_by_class(
 
 
 @router.get("/template")
-async def download_exam_template(
+def download_exam_template(
     context: Annotated[ProjectContext, Depends(require_permission("exam:create"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     class_section: str | None = Query(None, description="Class-section like '3-A'. If empty, generic template."),
     subject: str | None = Query(None, description="Subject for the exam template."),
     month: int | None = Query(None, ge=1, le=12, description="Month (1-12). Defaults to current month."),
@@ -205,7 +205,7 @@ async def download_exam_template(
     Requires exam:create permission.
     """
     service = ExamService(db)
-    content = await service.generate_template(
+    content = service.generate_template(
         project_id=context.project_id,
         class_section=class_section,
         subject=subject,
@@ -232,10 +232,10 @@ async def download_exam_template(
 
 
 @router.post("/bulk", response_model=BulkExamResponse)
-async def bulk_create_exam(
+def bulk_create_exam(
     request: BulkExamCreate,
     context: Annotated[ProjectContext, Depends(require_permission("exam:create"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -244,12 +244,12 @@ async def bulk_create_exam(
     Requires exam:create permission.
     """
     service = ExamService(db)
-    result = await service.bulk_create_or_update(context.project_id, request)
+    result = service.bulk_create_or_update(context.project_id, request)
 
     # Audit log
     if result.successful > 0:
         audit = AuditService(db)
-        await audit.log(
+        audit.log(
             action=AuditAction.DATA_CREATED,
             resource_type="exam_bulk",
             project_id=context.project_id,
@@ -269,9 +269,9 @@ async def bulk_create_exam(
 
 
 @router.post("/upload", response_model=ExamUploadResult)
-async def upload_exam_excel(
+def upload_exam_excel(
     context: Annotated[ProjectContext, Depends(require_permission("exam:create"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
     file: UploadFile = File(...),
 ):
@@ -287,19 +287,19 @@ async def upload_exam_excel(
     if not file.filename.endswith(".xlsx"):
         raise UploadError("Only .xlsx files are allowed")
 
-    content = await file.read()
+    content = file.file.read()
     if len(content) > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
         raise UploadError(f"File size exceeds {settings.MAX_UPLOAD_SIZE_MB}MB limit")
 
     service = ExamService(db)
-    result = await service.process_excel_upload(
+    result = service.process_excel_upload(
         project_id=context.project_id,
         file_content=content,
     )
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.UPLOAD_COMPLETED,
         resource_type="exam_upload",
         project_id=context.project_id,
@@ -318,26 +318,26 @@ async def upload_exam_excel(
 
 
 @router.get("/{record_id}", response_model=ExamRecordResponse)
-async def get_exam_record(
+def get_exam_record(
     record_id: int,
     context: Annotated[ProjectContext, Depends(require_permission("exam:view"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     Get exam record by ID.
     Requires exam:view permission.
     """
     service = ExamService(db)
-    record = await service.get_record(record_id, context.project_id)
+    record = service.get_record(record_id, context.project_id)
     return ExamRecordResponse.model_validate(service._record_to_response(record))
 
 
 @router.patch("/{record_id}", response_model=ExamRecordResponse)
-async def update_exam_record(
+def update_exam_record(
     record_id: int,
     request: ExamRecordUpdate,
     context: Annotated[ProjectContext, Depends(require_permission("exam:update"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -346,11 +346,11 @@ async def update_exam_record(
     Requires exam:update permission.
     """
     service = ExamService(db)
-    record = await service.update_record(record_id, context.project_id, request)
+    record = service.update_record(record_id, context.project_id, request)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.DATA_UPDATED,
         resource_type="exam",
         resource_id=str(record_id),
@@ -365,10 +365,10 @@ async def update_exam_record(
 
 
 @router.delete("/{record_id}", response_model=MessageResponse)
-async def delete_exam_record(
+def delete_exam_record(
     record_id: int,
     context: Annotated[ProjectContext, Depends(require_permission("exam:delete"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -376,11 +376,11 @@ async def delete_exam_record(
     Requires exam:delete permission.
     """
     service = ExamService(db)
-    await service.delete_record(record_id, context.project_id)
+    service.delete_record(record_id, context.project_id)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.DATA_DELETED,
         resource_type="exam",
         resource_id=str(record_id),

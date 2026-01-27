@@ -5,7 +5,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import ProjectContext, require_permission
@@ -18,9 +18,9 @@ router = APIRouter()
 
 
 @router.get("", response_model=PaginatedResponse[AuditLogWithUser])
-async def list_audit_logs(
+def list_audit_logs(
     context: Annotated[ProjectContext, Depends(require_permission("audit:view"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     action: AuditAction | None = None,
     user_id: UUID | None = None,
     resource_type: str | None = None,
@@ -42,7 +42,7 @@ async def list_audit_logs(
         date_from=date_from,
         date_to=date_to,
     )
-    logs, total = await service.list_logs(
+    logs, total = service.list_logs(
         project_id=context.project_id,
         filters=filters,
         page=page,
@@ -59,7 +59,7 @@ async def list_audit_logs(
 
 
 @router.get("/actions", response_model=list[str])
-async def list_audit_actions(
+def list_audit_actions(
     context: ProjectContext,
 ):
     """
@@ -69,9 +69,9 @@ async def list_audit_actions(
 
 
 @router.get("/resource-types", response_model=list[str])
-async def list_resource_types(
+def list_resource_types(
     context: ProjectContext,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     List distinct resource types in the audit log.
@@ -79,7 +79,7 @@ async def list_resource_types(
     from sqlalchemy import distinct, select
     from app.models.audit import AuditLog
 
-    result = await db.execute(
+    result = db.execute(
         select(distinct(AuditLog.resource_type))
         .where(AuditLog.project_id == context.project_id)
         .order_by(AuditLog.resource_type)

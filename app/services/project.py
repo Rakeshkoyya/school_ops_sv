@@ -1,7 +1,7 @@
 """Project management service."""
 
 from sqlalchemy import delete, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import NotFoundError, PermissionDeniedError, ValidationError
@@ -42,10 +42,10 @@ STAFF_DEFAULT_PERMISSIONS = [
 class ProjectService:
     """Project management service."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: Session):
         self.db = db
 
-    async def create_project(
+    def create_project(
         self,
         request: ProjectCreate,
         created_by_id: int,
@@ -61,14 +61,14 @@ class ProjectService:
         )
 
         self.db.add(project)
-        await self.db.flush()
+        self.db.flush()
 
         admin_role_id = None
 
         # Create default roles if requested
         if request.add_default_roles:
             # Get all permissions from the database
-            perm_result = await self.db.execute(select(Permission))
+            perm_result = self.db.execute(select(Permission))
             all_permissions = {p.permission_key: p.id for p in perm_result.scalars().all()}
 
             # Create School Admin role
@@ -80,7 +80,7 @@ class ProjectService:
                 is_role_admin=True,
             )
             self.db.add(school_admin_role)
-            await self.db.flush()
+            self.db.flush()
             admin_role_id = school_admin_role.id
 
             # Assign all permissions to School Admin except excluded ones
@@ -102,7 +102,7 @@ class ProjectService:
                 is_role_admin=False,
             )
             self.db.add(staff_role)
-            await self.db.flush()
+            self.db.flush()
 
             # Assign limited permissions to Staff role
             for perm_key in STAFF_DEFAULT_PERMISSIONS:
@@ -114,7 +114,7 @@ class ProjectService:
                     )
                     self.db.add(role_perm)
 
-            await self.db.flush()
+            self.db.flush()
 
         # Assign creator as School Admin if default roles were created
         if admin_role_id:
@@ -124,15 +124,15 @@ class ProjectService:
                 project_id=project.id,
             )
             self.db.add(user_role)
-            await self.db.flush()
+            self.db.flush()
 
-        await self.db.refresh(project)
+        self.db.refresh(project)
 
         return ProjectResponse.model_validate(project)
 
-    async def get_project(self, project_id: int) -> Project:
+    def get_project(self, project_id: int) -> Project:
         """Get project by ID."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(Project).where(Project.id == project_id)
         )
         project = result.scalar_one_or_none()
@@ -142,30 +142,30 @@ class ProjectService:
 
         return project
 
-    async def update_project(
+    def update_project(
         self,
         project_id: int,
         request: ProjectUpdate,
     ) -> ProjectResponse:
         """Update project metadata."""
-        project = await self.get_project(project_id)
+        project = self.get_project(project_id)
 
         update_data = request.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             setattr(project, field, value)
 
-        await self.db.flush()
-        await self.db.refresh(project)
+        self.db.flush()
+        self.db.refresh(project)
 
         return ProjectResponse.model_validate(project)
 
-    async def list_user_projects(self, user_id: int) -> list[ProjectListItem]:
+    def list_user_projects(self, user_id: int) -> list[ProjectListItem]:
         """List all project-role combinations for a user.
         
         Returns all roles the user has across all projects.
         A user with multiple roles in the same project will have multiple entries.
         """
-        result = await self.db.execute(
+        result = self.db.execute(
             select(Project, Role)
             .join(UserRoleProject, Project.id == UserRoleProject.project_id)
             .join(Role, UserRoleProject.role_id == Role.id)
@@ -194,23 +194,23 @@ class ProjectService:
 
         return project_roles
 
-    async def suspend_project(self, project_id: int) -> ProjectResponse:
+    def suspend_project(self, project_id: int) -> ProjectResponse:
         """Suspend a project (block all mutations)."""
-        project = await self.get_project(project_id)
+        project = self.get_project(project_id)
         project.status = ProjectStatus.SUSPENDED
-        await self.db.flush()
-        await self.db.refresh(project)
+        self.db.flush()
+        self.db.refresh(project)
         return ProjectResponse.model_validate(project)
 
-    async def activate_project(self, project_id: int) -> ProjectResponse:
+    def activate_project(self, project_id: int) -> ProjectResponse:
         """Activate a suspended project."""
-        project = await self.get_project(project_id)
+        project = self.get_project(project_id)
         project.status = ProjectStatus.ACTIVE
-        await self.db.flush()
-        await self.db.refresh(project)
+        self.db.flush()
+        self.db.refresh(project)
         return ProjectResponse.model_validate(project)
 
-    async def delete_project(self, project_id: int) -> None:
+    def delete_project(self, project_id: int) -> None:
         """Delete a project and all its related data.
         
         This is a destructive operation that cannot be undone.
@@ -218,12 +218,12 @@ class ProjectService:
         by the database due to ON DELETE CASCADE foreign key constraints.
         """
         # Verify project exists first
-        await self.get_project(project_id)
+        self.get_project(project_id)
         
         # Use direct SQL DELETE to avoid ORM loading relationships
         # and trying to set foreign keys to NULL
-        await self.db.execute(
+        self.db.execute(
             delete(Project).where(Project.id == project_id)
         )
-        await self.db.flush()
+        self.db.flush()
 

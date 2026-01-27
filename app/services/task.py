@@ -3,7 +3,7 @@
 from datetime import date, datetime, timezone
 
 from sqlalchemy import and_, func, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
@@ -26,12 +26,12 @@ from app.schemas.task import (
 class TaskService:
     """Task management service."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: Session):
         self.db = db
 
     # ==================== Category Methods ====================
 
-    async def create_category(
+    def create_category(
         self,
         project_id: int,
         request: TaskCategoryCreate,
@@ -43,17 +43,17 @@ class TaskService:
             description=request.description,
         )
         self.db.add(category)
-        await self.db.flush()
-        await self.db.refresh(category)
+        self.db.flush()
+        self.db.refresh(category)
         return TaskCategoryResponse.model_validate(category)
 
-    async def get_category(
+    def get_category(
         self,
         category_id: int,
         project_id: int,
     ) -> TaskCategory:
         """Get category by ID."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(TaskCategory).where(
                 TaskCategory.id == category_id,
                 TaskCategory.project_id == project_id,
@@ -64,12 +64,12 @@ class TaskService:
             raise NotFoundError("Task category", str(category_id))
         return category
 
-    async def list_categories(
+    def list_categories(
         self,
         project_id: int,
     ) -> list[TaskCategoryResponse]:
         """List all categories for a project."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(TaskCategory)
             .where(TaskCategory.project_id == project_id)
             .order_by(TaskCategory.name)
@@ -77,34 +77,34 @@ class TaskService:
         categories = result.scalars().all()
         return [TaskCategoryResponse.model_validate(c) for c in categories]
 
-    async def update_category(
+    def update_category(
         self,
         category_id: int,
         project_id: int,
         request: TaskCategoryUpdate,
     ) -> TaskCategoryResponse:
         """Update a category."""
-        category = await self.get_category(category_id, project_id)
+        category = self.get_category(category_id, project_id)
         update_data = request.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             setattr(category, field, value)
-        await self.db.flush()
-        await self.db.refresh(category)
+        self.db.flush()
+        self.db.refresh(category)
         return TaskCategoryResponse.model_validate(category)
 
-    async def delete_category(
+    def delete_category(
         self,
         category_id: int,
         project_id: int,
     ) -> None:
         """Delete a category (tasks will have null category)."""
-        category = await self.get_category(category_id, project_id)
-        await self.db.delete(category)
-        await self.db.flush()
+        category = self.get_category(category_id, project_id)
+        self.db.delete(category)
+        self.db.flush()
 
     # ==================== Task Creation Methods ====================
 
-    async def create_task(
+    def create_task(
         self,
         project_id: int,
         user_id: int,
@@ -112,16 +112,16 @@ class TaskService:
     ) -> TaskWithDetails:
         """Create a new task."""
         if request.category_id:
-            await self.get_category(request.category_id, project_id)
+            self.get_category(request.category_id, project_id)
 
         # Determine assigned user - default to creator if not specified
         assigned_user_id = request.assigned_to_user_id or user_id
         if request.assigned_to_user_id:
-            await self._verify_user_in_project(request.assigned_to_user_id, project_id)
+            self._verify_user_in_project(request.assigned_to_user_id, project_id)
         
         # If assigning to a role, verify the role exists in the project
         if request.assigned_to_role_id:
-            await self._verify_role_in_project(request.assigned_to_role_id, project_id)
+            self._verify_role_in_project(request.assigned_to_role_id, project_id)
 
         task = Task(
             project_id=project_id,
@@ -135,21 +135,21 @@ class TaskService:
             created_by_id=user_id,
         )
         self.db.add(task)
-        await self.db.flush()
+        self.db.flush()
         
         # Reload task with relationships
-        task = await self.get_task(task.id, project_id)
-        return await self._enrich_task(task)
+        task = self.get_task(task.id, project_id)
+        return self._enrich_task(task)
 
     # ==================== Task Query Methods ====================
 
-    async def get_task(
+    def get_task(
         self,
         task_id: int,
         project_id: int,
     ) -> Task:
         """Get task by ID."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(Task)
             .options(
                 selectinload(Task.category),
@@ -167,7 +167,7 @@ class TaskService:
             raise NotFoundError("Task", str(task_id))
         return task
 
-    async def get_my_tasks(
+    def get_my_tasks(
         self,
         project_id: int,
         user_id: int,
@@ -177,7 +177,7 @@ class TaskService:
         conditions = [Task.assigned_to_user_id == user_id]
 
         if include_role_tasks:
-            role_result = await self.db.execute(
+            role_result = self.db.execute(
                 select(UserRoleProject.role_id).where(
                     UserRoleProject.user_id == user_id,
                     UserRoleProject.project_id == project_id,
@@ -203,17 +203,17 @@ class TaskService:
             .order_by(Task.due_date.asc().nullslast(), Task.created_at.desc())
         )
 
-        result = await self.db.execute(query)
+        result = self.db.execute(query)
         tasks = result.scalars().all()
-        return [await self._enrich_task(t) for t in tasks]
+        return [self._enrich_task(t) for t in tasks]
 
-    async def get_my_tasks_grouped_by_category(
+    def get_my_tasks_grouped_by_category(
         self,
         project_id: int,
         user_id: int,
     ) -> list[TasksGroupedByCategory]:
         """Get user's tasks grouped by category."""
-        tasks = await self.get_my_tasks(project_id, user_id)
+        tasks = self.get_my_tasks(project_id, user_id)
 
         # Group by category
         groups: dict[int | None, TasksGroupedByCategory] = {}
@@ -234,14 +234,14 @@ class TaskService:
         )
         return sorted_groups
 
-    async def get_staff_tasks(
+    def get_staff_tasks(
         self,
         project_id: int,
         staff_user_id: int,
     ) -> StaffTasksSummary:
         """Get tasks for a specific staff member (admin view)."""
         # Get user info
-        user_result = await self.db.execute(
+        user_result = self.db.execute(
             select(User).where(User.id == staff_user_id)
         )
         user = user_result.scalar_one_or_none()
@@ -264,9 +264,9 @@ class TaskService:
             .order_by(Task.due_date.asc().nullslast(), Task.created_at.desc())
         )
 
-        result = await self.db.execute(query)
+        result = self.db.execute(query)
         tasks = result.scalars().all()
-        enriched_tasks = [await self._enrich_task(t) for t in tasks]
+        enriched_tasks = [self._enrich_task(t) for t in tasks]
 
         # Calculate counts
         today = date.today()
@@ -288,7 +288,7 @@ class TaskService:
             tasks=enriched_tasks,
         )
 
-    async def list_tasks(
+    def list_tasks(
         self,
         project_id: int,
         filters: TaskFilter | None = None,
@@ -321,7 +321,7 @@ class TaskService:
                 )
 
         # Count total
-        count_result = await self.db.execute(
+        count_result = self.db.execute(
             select(func.count()).select_from(query.subquery())
         )
         total = count_result.scalar() or 0
@@ -340,14 +340,14 @@ class TaskService:
             .limit(page_size)
         )
 
-        result = await self.db.execute(query)
+        result = self.db.execute(query)
         tasks = result.scalars().all()
-        enriched = [await self._enrich_task(t) for t in tasks]
+        enriched = [self._enrich_task(t) for t in tasks]
         return enriched, total
 
     # ==================== Task Update Methods ====================
 
-    async def update_task(
+    def update_task(
         self,
         task_id: int,
         project_id: int,
@@ -356,7 +356,7 @@ class TaskService:
         is_admin: bool = False,
     ) -> TaskWithDetails:
         """Update a task."""
-        task = await self.get_task(task_id, project_id)
+        task = self.get_task(task_id, project_id)
 
         # Check permissions: admin can update any task, user can update tasks they created or are assigned to
         if not is_admin:
@@ -366,23 +366,23 @@ class TaskService:
         update_data = request.model_dump(exclude_unset=True)
 
         if "category_id" in update_data and update_data["category_id"]:
-            await self.get_category(update_data["category_id"], project_id)
+            self.get_category(update_data["category_id"], project_id)
 
         for field, value in update_data.items():
             setattr(task, field, value)
 
-        await self.db.flush()
-        await self.db.refresh(task)
-        return await self._enrich_task(task)
+        self.db.flush()
+        self.db.refresh(task)
+        return self._enrich_task(task)
 
-    async def start_task(
+    def start_task(
         self,
         task_id: int,
         project_id: int,
         user_id: int,
     ) -> TaskWithDetails:
         """Start working on a task (sets start_time and status to in_progress)."""
-        task = await self.get_task(task_id, project_id)
+        task = self.get_task(task_id, project_id)
 
         # Verify user is assigned to this task
         if task.assigned_to_user_id != user_id:
@@ -393,18 +393,18 @@ class TaskService:
 
         task.start_time = datetime.now(timezone.utc)
         task.status = TaskStatus.IN_PROGRESS
-        await self.db.flush()
-        await self.db.refresh(task)
-        return await self._enrich_task(task)
+        self.db.flush()
+        self.db.refresh(task)
+        return self._enrich_task(task)
 
-    async def complete_task(
+    def complete_task(
         self,
         task_id: int,
         project_id: int,
         user_id: int,
     ) -> TaskWithDetails:
         """Mark a task as complete."""
-        task = await self.get_task(task_id, project_id)
+        task = self.get_task(task_id, project_id)
 
         # Verify user is assigned to this task
         if task.assigned_to_user_id != user_id:
@@ -412,11 +412,11 @@ class TaskService:
 
         task.end_time = datetime.now(timezone.utc)
         task.status = TaskStatus.DONE
-        await self.db.flush()
-        await self.db.refresh(task)
-        return await self._enrich_task(task)
+        self.db.flush()
+        self.db.refresh(task)
+        return self._enrich_task(task)
 
-    async def update_task_status(
+    def update_task_status(
         self,
         task_id: int,
         project_id: int,
@@ -424,7 +424,7 @@ class TaskService:
         status: TaskStatus,
     ) -> TaskWithDetails:
         """Quick status update for a task."""
-        task = await self.get_task(task_id, project_id)
+        task = self.get_task(task_id, project_id)
 
         # Verify user is assigned to this task
         if task.assigned_to_user_id != user_id:
@@ -436,11 +436,11 @@ class TaskService:
         elif status == TaskStatus.DONE:
             task.end_time = datetime.now(timezone.utc)
 
-        await self.db.flush()
-        await self.db.refresh(task)
-        return await self._enrich_task(task)
+        self.db.flush()
+        self.db.refresh(task)
+        return self._enrich_task(task)
 
-    async def delete_task(
+    def delete_task(
         self,
         task_id: int,
         project_id: int,
@@ -448,21 +448,21 @@ class TaskService:
         is_admin: bool = False,
     ) -> None:
         """Delete a task."""
-        task = await self.get_task(task_id, project_id)
+        task = self.get_task(task_id, project_id)
 
         # Check permissions
         if not is_admin:
             if task.created_by_id != user_id:
                 raise ForbiddenError("You can only delete tasks you created")
 
-        await self.db.delete(task)
-        await self.db.flush()
+        self.db.delete(task)
+        self.db.flush()
 
     # ==================== Helper Methods ====================
 
-    async def _verify_user_in_project(self, user_id: int, project_id: int) -> None:
+    def _verify_user_in_project(self, user_id: int, project_id: int) -> None:
         """Verify a user exists and has access to the project."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(UserRoleProject).where(
                 UserRoleProject.user_id == user_id,
                 UserRoleProject.project_id == project_id,
@@ -471,9 +471,9 @@ class TaskService:
         if not result.scalar_one_or_none():
             raise ValidationError(f"User {user_id} is not a member of this project")
 
-    async def _verify_role_in_project(self, role_id: int, project_id: int) -> None:
+    def _verify_role_in_project(self, role_id: int, project_id: int) -> None:
         """Verify a role exists in the project."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(Role).where(
                 Role.id == role_id,
                 Role.project_id == project_id,
@@ -482,7 +482,7 @@ class TaskService:
         if not result.scalar_one_or_none():
             raise ValidationError(f"Role {role_id} is not in this project")
 
-    async def _enrich_task(self, task: Task) -> TaskWithDetails:
+    def _enrich_task(self, task: Task) -> TaskWithDetails:
         """Enrich task with related names and computed fields."""
         today = date.today()
         now = datetime.now(timezone.utc)
@@ -532,9 +532,9 @@ class TaskService:
             elapsed_seconds=elapsed_seconds,
         )
 
-    async def get_project_staff(self, project_id: int) -> list[dict]:
+    def get_project_staff(self, project_id: int) -> list[dict]:
         """Get list of staff members in the project for admin selection."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(User, Role.name.label("role_name"))
             .join(UserRoleProject, UserRoleProject.user_id == User.id)
             .join(Role, Role.id == UserRoleProject.role_id)

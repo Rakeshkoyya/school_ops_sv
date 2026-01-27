@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
 
     # Database
-    DATABASE_URL: PostgresDsn = "postgresql+asyncpg://postgres:postgres@localhost:5432/school_agent"
+    DATABASE_URL: PostgresDsn = "postgresql://postgres:postgres@localhost:5434/school_agent1"
 
     # JWT Settings
     JWT_SECRET_KEY: str = "your-super-secret-key-change-in-production"
@@ -45,11 +45,6 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return v
         return v
-
-    @property
-    def database_url_sync(self) -> str:
-        """Get synchronous database URL for Alembic."""
-        return str(self.DATABASE_URL).replace("+asyncpg", "")
 
 
 @lru_cache

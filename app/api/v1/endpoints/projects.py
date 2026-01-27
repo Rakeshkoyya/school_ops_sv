@@ -4,7 +4,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import CurrentUser, ProjectContext, require_project_admin
@@ -25,10 +25,10 @@ router = APIRouter()
 
 
 @router.post("", response_model=ProjectResponse)
-async def create_project(
+def create_project(
     request: ProjectCreate,
     current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -37,11 +37,11 @@ async def create_project(
     """
     logger.info(f"Creating project with data: {request}")
     service = ProjectService(db)
-    project = await service.create_project(request, current_user.id)
+    project = service.create_project(request, current_user.id)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.PROJECT_CREATED,
         resource_type="project",
         resource_id=str(project.id),
@@ -55,19 +55,19 @@ async def create_project(
 
 
 @router.get("", response_model=list[ProjectListItem])
-async def list_user_projects(
+def list_user_projects(
     current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     List all projects the current user belongs to.
     """
     service = ProjectService(db)
-    return await service.list_user_projects(current_user.id)
+    return service.list_user_projects(current_user.id)
 
 
 @router.get("/current", response_model=ProjectResponse)
-async def get_current_project(
+def get_current_project(
     context: ProjectContext,
 ):
     """
@@ -77,26 +77,26 @@ async def get_current_project(
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
-async def get_project(
+def get_project(
     project_id: int,
     context: ProjectContext,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     Get project details by ID.
     User must have access to the project.
     """
     service = ProjectService(db)
-    project = await service.get_project(project_id)
+    project = service.get_project(project_id)
     return ProjectResponse.model_validate(project)
 
 
 @router.patch("/{project_id}", response_model=ProjectResponse)
-async def update_project(
+def update_project(
     project_id: int,
     request: ProjectUpdate,
     context: Annotated[ProjectContext, Depends(require_project_admin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -104,11 +104,11 @@ async def update_project(
     Requires project admin role.
     """
     service = ProjectService(db)
-    project = await service.update_project(project_id, request)
+    project = service.update_project(project_id, request)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.PROJECT_UPDATED,
         resource_type="project",
         resource_id=str(project_id),
@@ -123,10 +123,10 @@ async def update_project(
 
 
 @router.post("/{project_id}/suspend", response_model=ProjectResponse)
-async def suspend_project(
+def suspend_project(
     project_id: int,
     context: Annotated[ProjectContext, Depends(require_project_admin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -134,11 +134,11 @@ async def suspend_project(
     Requires project admin role.
     """
     service = ProjectService(db)
-    project = await service.suspend_project(project_id)
+    project = service.suspend_project(project_id)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.PROJECT_SUSPENDED,
         resource_type="project",
         resource_id=str(project_id),
@@ -152,10 +152,10 @@ async def suspend_project(
 
 
 @router.post("/{project_id}/activate", response_model=ProjectResponse)
-async def activate_project(
+def activate_project(
     project_id: int,
     context: Annotated[ProjectContext, Depends(require_project_admin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -163,11 +163,11 @@ async def activate_project(
     Requires project admin role.
     """
     service = ProjectService(db)
-    project = await service.activate_project(project_id)
+    project = service.activate_project(project_id)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.PROJECT_ACTIVATED,
         resource_type="project",
         resource_id=str(project_id),
@@ -181,10 +181,10 @@ async def activate_project(
 
 
 @router.delete("/{project_id}", response_model=MessageResponse)
-async def delete_project(
+def delete_project(
     project_id: int,
     current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -196,14 +196,14 @@ async def delete_project(
         raise PermissionDeniedError("Super admin access required")
     
     service = ProjectService(db)
-    project = await service.get_project(project_id)
+    project = service.get_project(project_id)
     project_name = project.name
     
-    await service.delete_project(project_id)
+    service.delete_project(project_id)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.PROJECT_DELETED,
         resource_type="project",
         resource_id=str(project_id),

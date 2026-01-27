@@ -6,7 +6,7 @@ from io import BytesIO
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -34,10 +34,10 @@ router = APIRouter()
 
 
 @router.post("", response_model=AttendanceRecordResponse)
-async def create_attendance_record(
+def create_attendance_record(
     request: AttendanceRecordCreate,
     context: Annotated[ProjectContext, Depends(require_permission("attendance:create"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -45,11 +45,11 @@ async def create_attendance_record(
     Requires attendance:create permission.
     """
     service = AttendanceService(db)
-    record = await service.create_record(context.project_id, request)
+    record = service.create_record(context.project_id, request)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.DATA_CREATED,
         resource_type="attendance",
         resource_id=str(record.id),
@@ -63,9 +63,9 @@ async def create_attendance_record(
 
 
 @router.get("", response_model=PaginatedResponse[AttendanceRecordResponse])
-async def list_attendance_records(
+def list_attendance_records(
     context: Annotated[ProjectContext, Depends(require_permission("attendance:view"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     student_id: int | None = None,
     class_section: str | None = None,
     class_name: str | None = None,
@@ -90,7 +90,7 @@ async def list_attendance_records(
         date_from=date_from,
         date_to=date_to,
     )
-    records, total = await service.list_records(
+    records, total = service.list_records(
         context.project_id,
         filters=filters,
         page=page,
@@ -107,9 +107,9 @@ async def list_attendance_records(
 
 
 @router.get("/summary", response_model=AttendanceSummary)
-async def get_attendance_summary(
+def get_attendance_summary(
     context: Annotated[ProjectContext, Depends(require_permission("attendance:view"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     date_from: date = Query(...),
     date_to: date = Query(...),
     student_id: int | None = None,
@@ -120,7 +120,7 @@ async def get_attendance_summary(
     Requires attendance:view permission.
     """
     service = AttendanceService(db)
-    return await service.get_summary(
+    return service.get_summary(
         context.project_id,
         date_from=date_from,
         date_to=date_to,
@@ -130,22 +130,22 @@ async def get_attendance_summary(
 
 
 @router.get("/class-sections")
-async def get_class_sections(
+def get_class_sections(
     context: Annotated[ProjectContext, Depends(require_permission("attendance:view"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     Get distinct class-section combinations with student counts.
     Requires attendance:view permission.
     """
     service = AttendanceService(db)
-    return await service.get_class_sections(context.project_id)
+    return service.get_class_sections(context.project_id)
 
 
 @router.get("/by-class", response_model=AttendanceByClassResponse)
-async def get_attendance_by_class(
+def get_attendance_by_class(
     context: Annotated[ProjectContext, Depends(require_permission("attendance:view"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     class_section: str = Query(..., description="Class-section like '3-A'"),
     attendance_date: date = Query(..., description="Date for attendance"),
 ):
@@ -155,7 +155,7 @@ async def get_attendance_by_class(
     Requires attendance:view permission.
     """
     service = AttendanceService(db)
-    return await service.get_attendance_by_class_date(
+    return service.get_attendance_by_class_date(
         context.project_id,
         class_section=class_section,
         attendance_date=attendance_date,
@@ -163,9 +163,9 @@ async def get_attendance_by_class(
 
 
 @router.get("/template")
-async def download_attendance_template(
+def download_attendance_template(
     context: Annotated[ProjectContext, Depends(require_permission("attendance:create"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     class_section: str | None = Query(None, description="Class-section like '3-A'. If empty, generic template."),
     month: int | None = Query(None, ge=1, le=12, description="Month (1-12). Defaults to current month."),
     year: int | None = Query(None, description="Year. Defaults to current year."),
@@ -176,7 +176,7 @@ async def download_attendance_template(
     Requires attendance:create permission.
     """
     service = AttendanceService(db)
-    content = await service.generate_template(
+    content = service.generate_template(
         project_id=context.project_id,
         class_section=class_section,
         month=month,
@@ -200,10 +200,10 @@ async def download_attendance_template(
 
 
 @router.post("/bulk", response_model=BulkAttendanceResponse)
-async def bulk_create_attendance(
+def bulk_create_attendance(
     request: BulkAttendanceCreate,
     context: Annotated[ProjectContext, Depends(require_permission("attendance:create"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -212,12 +212,12 @@ async def bulk_create_attendance(
     Requires attendance:create permission.
     """
     service = AttendanceService(db)
-    result = await service.bulk_create_or_update(context.project_id, request)
+    result = service.bulk_create_or_update(context.project_id, request)
 
     # Audit log
     if result.successful > 0:
         audit = AuditService(db)
-        await audit.log(
+        audit.log(
             action=AuditAction.DATA_CREATED,
             resource_type="attendance_bulk",
             project_id=context.project_id,
@@ -236,9 +236,9 @@ async def bulk_create_attendance(
 
 
 @router.post("/upload", response_model=AttendanceUploadResult)
-async def upload_attendance_excel(
+def upload_attendance_excel(
     context: Annotated[ProjectContext, Depends(require_permission("attendance:create"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
     file: UploadFile = File(...),
 ):
@@ -255,19 +255,19 @@ async def upload_attendance_excel(
     if not file.filename.endswith(".xlsx"):
         raise UploadError("Only .xlsx files are allowed")
 
-    content = await file.read()
+    content = file.file.read()
     if len(content) > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
         raise UploadError(f"File size exceeds {settings.MAX_UPLOAD_SIZE_MB}MB limit")
 
     service = AttendanceService(db)
-    result = await service.process_excel_upload(
+    result = service.process_excel_upload(
         project_id=context.project_id,
         file_content=content,
     )
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.UPLOAD_COMPLETED,
         resource_type="attendance_upload",
         project_id=context.project_id,
@@ -286,26 +286,26 @@ async def upload_attendance_excel(
 
 
 @router.get("/{record_id}", response_model=AttendanceRecordResponse)
-async def get_attendance_record(
+def get_attendance_record(
     record_id: int,
     context: Annotated[ProjectContext, Depends(require_permission("attendance:view"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     Get attendance record by ID.
     Requires attendance:view permission.
     """
     service = AttendanceService(db)
-    record = await service.get_record(record_id, context.project_id)
+    record = service.get_record(record_id, context.project_id)
     return AttendanceRecordResponse.model_validate(service._record_to_response(record))
 
 
 @router.patch("/{record_id}", response_model=AttendanceRecordResponse)
-async def update_attendance_record(
+def update_attendance_record(
     record_id: int,
     request: AttendanceRecordUpdate,
     context: Annotated[ProjectContext, Depends(require_permission("attendance:update"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -313,11 +313,11 @@ async def update_attendance_record(
     Requires attendance:update permission.
     """
     service = AttendanceService(db)
-    record = await service.update_record(record_id, context.project_id, request)
+    record = service.update_record(record_id, context.project_id, request)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.DATA_UPDATED,
         resource_type="attendance",
         resource_id=str(record_id),
@@ -332,10 +332,10 @@ async def update_attendance_record(
 
 
 @router.delete("/{record_id}", response_model=MessageResponse)
-async def delete_attendance_record(
+def delete_attendance_record(
     record_id: int,
     context: Annotated[ProjectContext, Depends(require_permission("attendance:delete"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -343,11 +343,11 @@ async def delete_attendance_record(
     Requires attendance:delete permission.
     """
     service = AttendanceService(db)
-    await service.delete_record(record_id, context.project_id)
+    service.delete_record(record_id, context.project_id)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.DATA_DELETED,
         resource_type="attendance",
         resource_id=str(record_id),

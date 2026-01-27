@@ -6,8 +6,7 @@ from uuid import UUID
 
 from openpyxl import Workbook, load_workbook
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.exceptions import AuthenticationError, NotFoundError, ValidationError
 from app.core.security import (
@@ -46,12 +45,12 @@ USER_TEMPLATE_COLUMNS = [
 class AuthService:
     """Authentication service."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: Session):
         self.db = db
 
-    async def login(self, request: LoginRequest) -> TokenResponse:
+    def login(self, request: LoginRequest) -> TokenResponse:
         """Authenticate user and return tokens."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(User).where(User.username == request.username)
         )
         user = result.scalar_one_or_none()
@@ -67,7 +66,7 @@ class AuthService:
 
         # Update last login
         user.last_login_at = datetime.now(timezone.utc)
-        await self.db.flush()
+        self.db.flush()
 
         # Generate tokens
         access_token = create_access_token(user.id, user.username)
@@ -82,7 +81,7 @@ class AuthService:
             expires_in=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         )
 
-    async def refresh_tokens(self, refresh_token: str) -> TokenResponse:
+    def refresh_tokens(self, refresh_token: str) -> TokenResponse:
         """Refresh access token using refresh token."""
         payload = verify_refresh_token(refresh_token)
 
@@ -98,7 +97,7 @@ class AuthService:
         except ValueError:
             raise AuthenticationError("Invalid user ID in token")
 
-        result = await self.db.execute(select(User).where(User.id == user_uuid))
+        result = self.db.execute(select(User).where(User.id == user_uuid))
         user = result.scalar_one_or_none()
 
         if not user or not user.is_active:
@@ -117,10 +116,10 @@ class AuthService:
             expires_in=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         )
 
-    async def register_user(self, request: UserCreate) -> UserResponse:
+    def register_user(self, request: UserCreate) -> UserResponse:
         """Register a new user."""
         # Check if username exists
-        result = await self.db.execute(
+        result = self.db.execute(
             select(User).where(User.username == request.username)
         )
         existing = result.scalar_one_or_none()
@@ -138,14 +137,14 @@ class AuthService:
         )
 
         self.db.add(user)
-        await self.db.flush()
-        await self.db.refresh(user)
+        self.db.flush()
+        self.db.refresh(user)
 
         return UserResponse.model_validate(user)
 
-    async def get_user_by_id(self, user_id: UUID) -> User:
+    def get_user_by_id(self, user_id: UUID) -> User:
         """Get user by ID."""
-        result = await self.db.execute(select(User).where(User.id == user_id))
+        result = self.db.execute(select(User).where(User.id == user_id))
         user = result.scalar_one_or_none()
 
         if not user:
@@ -153,25 +152,25 @@ class AuthService:
 
         return user
 
-    async def change_password(
+    def change_password(
         self,
         user_id: UUID,
         current_password: str,
         new_password: str,
     ) -> None:
         """Change user password."""
-        user = await self.get_user_by_id(user_id)
+        user = self.get_user_by_id(user_id)
 
         if not verify_password(current_password, user.password_hash):
             raise AuthenticationError("Current password is incorrect")
 
         user.password_hash = hash_password(new_password)
-        await self.db.flush()
+        self.db.flush()
 
-    async def list_all_users(self) -> list[UserWithProjectRoles]:
+    def list_all_users(self) -> list[UserWithProjectRoles]:
         """List all users with their project-role mappings (for super admin)."""
         # Get all users
-        result = await self.db.execute(
+        result = self.db.execute(
             select(User).order_by(User.name)
         )
         users = result.scalars().all()
@@ -179,7 +178,7 @@ class AuthService:
         users_with_roles = []
         for user in users:
             # Get user's role assignments
-            role_result = await self.db.execute(
+            role_result = self.db.execute(
                 select(UserRoleProject, Role, Project)
                 .join(Role, UserRoleProject.role_id == Role.id)
                 .join(Project, UserRoleProject.project_id == Project.id)
@@ -209,7 +208,7 @@ class AuthService:
         
         return users_with_roles
 
-    async def list_unassigned_users(self) -> list[UserWithProjectRoles]:
+    def list_unassigned_users(self) -> list[UserWithProjectRoles]:
         """List users who have no project assignments (for super admin)."""
         from sqlalchemy import not_
         
@@ -218,7 +217,7 @@ class AuthService:
             UserRoleProject.user_id == User.id
         ).exists()
         
-        result = await self.db.execute(
+        result = self.db.execute(
             select(User)
             .where(not_(subquery))
             .order_by(User.name)
@@ -235,13 +234,13 @@ class AuthService:
         
         return users_with_roles
 
-    async def update_user_admin(
+    def update_user_admin(
         self,
         user_id: int,
         request: AdminUserUpdate,
     ) -> UserResponse:
         """Update user as admin (can toggle active/super admin)."""
-        result = await self.db.execute(select(User).where(User.id == user_id))
+        result = self.db.execute(select(User).where(User.id == user_id))
         user = result.scalar_one_or_none()
 
         if not user:
@@ -251,25 +250,25 @@ class AuthService:
         for field, value in update_data.items():
             setattr(user, field, value)
 
-        await self.db.flush()
-        await self.db.refresh(user)
+        self.db.flush()
+        self.db.refresh(user)
 
         return UserResponse.model_validate(user)
 
-    async def delete_user(self, user_id: int) -> None:
+    def delete_user(self, user_id: int) -> None:
         """Delete a user (for super admin)."""
-        result = await self.db.execute(select(User).where(User.id == user_id))
+        result = self.db.execute(select(User).where(User.id == user_id))
         user = result.scalar_one_or_none()
 
         if not user:
             raise NotFoundError("User", str(user_id))
 
-        await self.db.delete(user)
-        await self.db.flush()
+        self.db.delete(user)
+        self.db.flush()
 
-    async def is_user_in_project(self, user_id: int, project_id: int) -> bool:
+    def is_user_in_project(self, user_id: int, project_id: int) -> bool:
         """Check if a user belongs to a specific project."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(UserRoleProject)
             .where(
                 UserRoleProject.user_id == user_id,
@@ -278,7 +277,7 @@ class AuthService:
         )
         return result.scalar_one_or_none() is not None
 
-    async def update_project_user(
+    def update_project_user(
         self,
         user_id: int,
         project_id: int,
@@ -286,10 +285,10 @@ class AuthService:
     ) -> UserResponse:
         """Update user within a project context (for school admin)."""
         # First verify user is in this project
-        if not await self.is_user_in_project(user_id, project_id):
+        if not self.is_user_in_project(user_id, project_id):
             raise NotFoundError("User", str(user_id))
 
-        result = await self.db.execute(select(User).where(User.id == user_id))
+        result = self.db.execute(select(User).where(User.id == user_id))
         user = result.scalar_one_or_none()
 
         if not user:
@@ -299,15 +298,15 @@ class AuthService:
         for field, value in update_data.items():
             setattr(user, field, value)
 
-        await self.db.flush()
-        await self.db.refresh(user)
+        self.db.flush()
+        self.db.refresh(user)
 
         return UserResponse.model_validate(user)
 
-    async def remove_user_from_project(self, user_id: int, project_id: int) -> None:
+    def remove_user_from_project(self, user_id: int, project_id: int) -> None:
         """Remove a user from a project (removes their role assignment)."""
         # Check if user is in project
-        result = await self.db.execute(
+        result = self.db.execute(
             select(UserRoleProject)
             .where(
                 UserRoleProject.user_id == user_id,
@@ -319,8 +318,8 @@ class AuthService:
         if not assignment:
             raise NotFoundError("User", str(user_id))
 
-        await self.db.delete(assignment)
-        await self.db.flush()
+        self.db.delete(assignment)
+        self.db.flush()
 
     def generate_user_template(self, include_role_column: bool = False) -> bytes:
         """Generate Excel template for user bulk upload."""
@@ -358,7 +357,7 @@ class AuthService:
         output.seek(0)
         return output.getvalue()
 
-    async def bulk_upload_users(
+    def bulk_upload_users(
         self,
         file_content: bytes,
         project_id: int | None = None,
@@ -409,7 +408,7 @@ class AuthService:
                     raise ValidationError("Password must be at least 8 characters", details={"column": "Password", "row": row_num})
 
                 # Check if username exists
-                result = await self.db.execute(
+                result = self.db.execute(
                     select(User).where(User.username == username)
                 )
                 if result.scalar_one_or_none():
@@ -424,7 +423,7 @@ class AuthService:
                     is_active=True,
                 )
                 self.db.add(user)
-                await self.db.flush()
+                self.db.flush()
                 
                 # Assign role if project_id is provided
                 if project_id:
@@ -432,7 +431,7 @@ class AuthService:
                     
                     # Try to find role by name (case-insensitive)
                     if role_name:
-                        role_result = await self.db.execute(
+                        role_result = self.db.execute(
                             select(Role).where(
                                 Role.project_id == project_id,
                             )
@@ -450,7 +449,7 @@ class AuthService:
                             )
                     elif default_role_id:
                         # Use default role if no role name provided
-                        role_result = await self.db.execute(
+                        role_result = self.db.execute(
                             select(Role).where(
                                 Role.id == default_role_id,
                                 Role.project_id == project_id,
@@ -481,7 +480,7 @@ class AuthService:
                     "message": str(e),
                 })
 
-        await self.db.flush()
+        self.db.flush()
 
         total = len([r for r in rows if any(r)])
         message = f"Created {successful} of {total} users."
@@ -496,10 +495,10 @@ class AuthService:
             message=message,
         )
 
-    async def list_project_users(self, project_id: int) -> list[UserWithProjectRoles]:
+    def list_project_users(self, project_id: int) -> list[UserWithProjectRoles]:
         """List all users in a specific project with their roles."""
         # Get all users in this project
-        result = await self.db.execute(
+        result = self.db.execute(
             select(User)
             .join(UserRoleProject, User.id == UserRoleProject.user_id)
             .where(UserRoleProject.project_id == project_id)
@@ -511,7 +510,7 @@ class AuthService:
         users_with_roles = []
         for user in users:
             # Get user's role assignments in this project
-            role_result = await self.db.execute(
+            role_result = self.db.execute(
                 select(UserRoleProject, Role)
                 .join(Role, UserRoleProject.role_id == Role.id)
                 .where(
@@ -523,7 +522,7 @@ class AuthService:
             role_assignments = role_result.all()
             
             # Get project info
-            project_result = await self.db.execute(
+            project_result = self.db.execute(
                 select(Project).where(Project.id == project_id)
             )
             project = project_result.scalar_one_or_none()

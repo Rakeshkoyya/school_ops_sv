@@ -5,7 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.models.audit import AuditAction, AuditLog
 from app.schemas.audit import AuditLogFilter, AuditLogWithUser
@@ -14,10 +14,10 @@ from app.schemas.audit import AuditLogFilter, AuditLogWithUser
 class AuditService:
     """Audit logging service - append-only."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: Session):
         self.db = db
 
-    async def log(
+    def log(
         self,
         action: AuditAction,
         resource_type: str,
@@ -42,10 +42,10 @@ class AuditService:
             user_agent=user_agent,
         )
         self.db.add(log)
-        await self.db.flush()
+        self.db.flush()
         return log
 
-    async def list_logs(
+    def list_logs(
         self,
         project_id: UUID | None = None,
         filters: AuditLogFilter | None = None,
@@ -76,7 +76,7 @@ class AuditService:
                 query = query.where(AuditLog.created_at <= filters.date_to)
 
         # Count total
-        count_result = await self.db.execute(
+        count_result = self.db.execute(
             select(func.count()).select_from(query.subquery())
         )
         total = count_result.scalar() or 0
@@ -89,7 +89,7 @@ class AuditService:
             .limit(page_size)
         )
 
-        result = await self.db.execute(query)
+        result = self.db.execute(query)
         logs = result.scalars().all()
 
         return [
@@ -113,8 +113,8 @@ class AuditService:
 
 
 # Convenience functions for common audit actions
-async def audit_user_created(
-    db: AsyncSession,
+def audit_user_created(
+    db: Session,
     created_user_id: UUID,
     created_by_id: UUID,
     project_id: UUID | None = None,
@@ -122,7 +122,7 @@ async def audit_user_created(
 ) -> None:
     """Log user creation."""
     service = AuditService(db)
-    await service.log(
+    service.log(
         action=AuditAction.USER_CREATED,
         resource_type="user",
         resource_id=str(created_user_id),
@@ -133,8 +133,8 @@ async def audit_user_created(
     )
 
 
-async def audit_role_updated(
-    db: AsyncSession,
+def audit_role_updated(
+    db: Session,
     role_id: UUID,
     project_id: UUID,
     user_id: UUID,
@@ -143,7 +143,7 @@ async def audit_role_updated(
 ) -> None:
     """Log role update."""
     service = AuditService(db)
-    await service.log(
+    service.log(
         action=AuditAction.ROLE_UPDATED,
         resource_type="role",
         resource_id=str(role_id),
@@ -155,8 +155,8 @@ async def audit_role_updated(
     )
 
 
-async def audit_upload_failed(
-    db: AsyncSession,
+def audit_upload_failed(
+    db: Session,
     upload_id: UUID,
     project_id: UUID,
     user_id: UUID,
@@ -165,7 +165,7 @@ async def audit_upload_failed(
 ) -> None:
     """Log upload failure."""
     service = AuditService(db)
-    await service.log(
+    service.log(
         action=AuditAction.UPLOAD_FAILED,
         resource_type="upload",
         resource_id=str(upload_id),

@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import Depends, Header
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.exceptions import (
@@ -59,8 +59,8 @@ class CurrentUserContext:
         return self.user.is_super_admin
 
 
-async def get_current_user(
-    db: Annotated[AsyncSession, Depends(get_db)],
+def get_current_user(
+    db: Annotated[Session, Depends(get_db)],
     authorization: str = Header(..., description="Bearer token"),
 ) -> User:
     """Extract and validate the current user from JWT token."""
@@ -82,7 +82,7 @@ async def get_current_user(
     except ValueError:
         raise AuthenticationError("Invalid user ID in token")
 
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
 
     if not user:
@@ -94,8 +94,8 @@ async def get_current_user(
     return user
 
 
-async def get_project_context(
-    db: Annotated[AsyncSession, Depends(get_db)],
+def get_project_context(
+    db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
     x_project_id: str = Header(..., description="Project ID"),
 ) -> CurrentUserContext:
@@ -106,14 +106,14 @@ async def get_project_context(
         raise NotFoundError("Project", x_project_id)
 
     # Get project
-    result = await db.execute(select(Project).where(Project.id == project_id))
+    result = db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
 
     if not project:
         raise NotFoundError("Project", x_project_id)
 
     # Get user's roles for this project
-    roles_result = await db.execute(
+    roles_result = db.execute(
         select(Role)
         .join(UserRoleProject, Role.id == UserRoleProject.role_id)
         .where(
@@ -131,7 +131,7 @@ async def get_project_context(
     permissions: set[str] = set()
     if roles:
         role_ids = [role.id for role in roles]
-        permissions_result = await db.execute(
+        permissions_result = db.execute(
             select(Permission.permission_key)
             .join(RolePermission, Permission.id == RolePermission.permission_id)
             .where(
@@ -152,7 +152,7 @@ async def get_project_context(
 def require_permission(permission_key: str):
     """Dependency factory that requires a specific permission."""
 
-    async def check_permission(
+    def check_permission(
         context: Annotated[CurrentUserContext, Depends(get_project_context)],
     ) -> CurrentUserContext:
         if not context.has_permission(permission_key) and not context.is_project_admin():
@@ -168,7 +168,7 @@ def require_permission(permission_key: str):
 def require_project_active():
     """Dependency that ensures project is not suspended."""
 
-    async def check_project_status(
+    def check_project_status(
         context: Annotated[CurrentUserContext, Depends(get_project_context)],
     ) -> CurrentUserContext:
         if context.project and context.project.status == ProjectStatus.SUSPENDED:
@@ -181,7 +181,7 @@ def require_project_active():
 def require_project_admin():
     """Dependency that requires project admin role."""
 
-    async def check_admin(
+    def check_admin(
         context: Annotated[CurrentUserContext, Depends(get_project_context)],
     ) -> CurrentUserContext:
         if not context.is_project_admin():
@@ -194,7 +194,7 @@ def require_project_admin():
 def require_role_admin():
     """Dependency that requires role admin capability."""
 
-    async def check_role_admin(
+    def check_role_admin(
         context: Annotated[CurrentUserContext, Depends(get_project_context)],
     ) -> CurrentUserContext:
         if not context.is_role_admin() and not context.is_project_admin():

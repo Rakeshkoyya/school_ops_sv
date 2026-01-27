@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -33,16 +33,16 @@ router = APIRouter()
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(
+def login(
     request: LoginRequest,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
     Authenticate user and return access/refresh tokens.
     """
     service = AuthService(db)
-    response = await service.login(request)
+    response = service.login(request)
 
     # Audit log
     audit = AuditService(db)
@@ -52,7 +52,7 @@ async def login(
     if payload:
         user_id_str = payload.get("sub")
         user_id = int(user_id_str) if user_id_str else None
-        await audit.log(
+        audit.log(
             action=AuditAction.USER_LOGIN,
             resource_type="user",
             resource_id=user_id_str,
@@ -65,32 +65,32 @@ async def login(
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(
+def refresh_token(
     request: RefreshTokenRequest,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     Refresh access token using a valid refresh token.
     """
     service = AuthService(db)
-    return await service.refresh_tokens(request.refresh_token)
+    return service.refresh_tokens(request.refresh_token)
 
 
 @router.post("/register", response_model=UserResponse)
-async def register(
+def register(
     request: UserCreate,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
     Register a new user account.
     """
     service = AuthService(db)
-    user = await service.register_user(request)
+    user = service.register_user(request)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.USER_CREATED,
         resource_type="user",
         resource_id=str(user.id),
@@ -103,9 +103,9 @@ async def register(
 
 
 @router.get("/me", response_model=CurrentUserResponse)
-async def get_current_user_info(
+def get_current_user_info(
     current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     Get current authenticated user with their projects and role assignments.
@@ -123,7 +123,7 @@ async def get_current_user_info(
     rbac_service = RBACService(db)
     
     # Get all project-role combinations for the user
-    user_project_roles = await project_service.list_user_projects(current_user.id)
+    user_project_roles = project_service.list_user_projects(current_user.id)
     
     # Build unique projects list
     projects_map: dict[int, ProjectInfo] = {}
@@ -146,7 +146,7 @@ async def get_current_user_info(
         # Get permissions for this specific role
         role_permissions: set[str] = set()
         if proj.role_id:
-            role_permissions = await rbac_service.get_role_permissions(proj.role_id)
+            role_permissions = rbac_service.get_role_permissions(proj.role_id)
         all_permissions.update(role_permissions)
         
         # Add role assignment
@@ -170,16 +170,16 @@ async def get_current_user_info(
 
 
 @router.post("/change-password", response_model=MessageResponse)
-async def change_password(
+def change_password(
     request: PasswordChange,
     current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     Change current user's password.
     """
     service = AuthService(db)
-    await service.change_password(
+    service.change_password(
         current_user.id,
         request.current_password,
         request.new_password,
@@ -189,9 +189,9 @@ async def change_password(
 
 # Super Admin User Management Endpoints
 @router.get("/users", response_model=list[UserWithProjectRoles])
-async def list_all_users(
+def list_all_users(
     current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     unassigned_only: bool = Query(False, description="Only show users with no project assignments"),
 ):
     """
@@ -204,16 +204,16 @@ async def list_all_users(
     
     service = AuthService(db)
     if unassigned_only:
-        return await service.list_unassigned_users()
-    return await service.list_all_users()
+        return service.list_unassigned_users()
+    return service.list_all_users()
 
 
 @router.patch("/users/{user_id}", response_model=UserResponse)
-async def update_user_admin(
+def update_user_admin(
     user_id: int,
     request: AdminUserUpdate,
     current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -223,11 +223,11 @@ async def update_user_admin(
         raise PermissionDeniedError("Super admin access required")
     
     service = AuthService(db)
-    user = await service.update_user_admin(user_id, request)
+    user = service.update_user_admin(user_id, request)
     
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.USER_UPDATED,
         resource_type="user",
         resource_id=str(user_id),
@@ -241,10 +241,10 @@ async def update_user_admin(
 
 
 @router.delete("/users/{user_id}", response_model=MessageResponse)
-async def delete_user(
+def delete_user(
     user_id: int,
     current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -257,11 +257,11 @@ async def delete_user(
         raise PermissionDeniedError("Cannot delete your own account")
     
     service = AuthService(db)
-    await service.delete_user(user_id)
+    service.delete_user(user_id)
     
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.USER_DELETED,
         resource_type="user",
         resource_id=str(user_id),
@@ -274,9 +274,9 @@ async def delete_user(
 
 
 @router.get("/users/template")
-async def download_user_template(
+def download_user_template(
     current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     include_role: bool = Query(False, description="Include Role ID column"),
 ):
     """
@@ -297,9 +297,9 @@ async def download_user_template(
 
 
 @router.post("/users/upload", response_model=UserBulkUploadResult)
-async def bulk_upload_users(
+def bulk_upload_users(
     current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
     file: UploadFile = File(...),
     project_id: int | None = Query(None, description="Project ID to assign users to"),
@@ -322,16 +322,16 @@ async def bulk_upload_users(
     if not file.filename.endswith(".xlsx"):
         raise UploadError("Only .xlsx files are allowed")
 
-    content = await file.read()
+    content = file.file.read()
     if len(content) > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
         raise UploadError(f"File size exceeds {settings.MAX_UPLOAD_SIZE_MB}MB limit")
 
     service = AuthService(db)
-    result = await service.bulk_upload_users(content, project_id, default_role_id)
+    result = service.bulk_upload_users(content, project_id, default_role_id)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.UPLOAD_COMPLETED,
         resource_type="user_upload",
         user_id=current_user.id,
@@ -350,22 +350,22 @@ async def bulk_upload_users(
 
 # Project-scoped user management endpoints
 @router.get("/project-users", response_model=list[UserWithProjectRoles])
-async def list_project_users(
+def list_project_users(
     context: ProjectContext,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     List all users in the current project with their roles.
     Requires user:view permission or project admin.
     """
     service = AuthService(db)
-    return await service.list_project_users(context.project_id)
+    return service.list_project_users(context.project_id)
 
 
 @router.get("/project-users/template")
-async def download_project_user_template(
+def download_project_user_template(
     context: ProjectContext,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     Download Excel template for user bulk upload to project.
@@ -381,9 +381,9 @@ async def download_project_user_template(
 
 
 @router.post("/project-users/upload", response_model=UserBulkUploadResult)
-async def bulk_upload_project_users(
+def bulk_upload_project_users(
     context: ProjectContext,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
     file: UploadFile = File(...),
     default_role_id: int | None = Query(None, description="Default role ID if not specified in Excel"),
@@ -401,16 +401,16 @@ async def bulk_upload_project_users(
     if not file.filename.endswith(".xlsx"):
         raise UploadError("Only .xlsx files are allowed")
 
-    content = await file.read()
+    content = file.file.read()
     if len(content) > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
         raise UploadError(f"File size exceeds {settings.MAX_UPLOAD_SIZE_MB}MB limit")
 
     service = AuthService(db)
-    result = await service.bulk_upload_users(content, context.project_id, default_role_id)
+    result = service.bulk_upload_users(content, context.project_id, default_role_id)
 
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.UPLOAD_COMPLETED,
         resource_type="user_upload",
         project_id=context.project_id,
@@ -428,11 +428,11 @@ async def bulk_upload_project_users(
 
 
 @router.patch("/project-users/{user_id}", response_model=UserResponse)
-async def update_project_user(
+def update_project_user(
     user_id: int,
     request: ProjectUserUpdate,
     context: ProjectContext,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -449,11 +449,11 @@ async def update_project_user(
         raise PermissionDeniedError("Cannot modify your own account through this endpoint")
     
     service = AuthService(db)
-    user = await service.update_project_user(user_id, context.project_id, request)
+    user = service.update_project_user(user_id, context.project_id, request)
     
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.USER_UPDATED,
         resource_type="user",
         resource_id=str(user_id),
@@ -468,10 +468,10 @@ async def update_project_user(
 
 
 @router.delete("/project-users/{user_id}", response_model=MessageResponse)
-async def remove_user_from_project(
+def remove_user_from_project(
     user_id: int,
     context: ProjectContext,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
 ):
     """
@@ -488,11 +488,11 @@ async def remove_user_from_project(
         raise PermissionDeniedError("Cannot remove yourself from the project")
     
     service = AuthService(db)
-    await service.remove_user_from_project(user_id, context.project_id)
+    service.remove_user_from_project(user_id, context.project_id)
     
     # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         action=AuditAction.ROLE_REVOKED,
         resource_type="user_project_assignment",
         resource_id=str(user_id),

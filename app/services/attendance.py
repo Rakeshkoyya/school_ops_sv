@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import get_column_letter
 from sqlalchemy import func, select, and_, or_, Integer
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError, ValidationError
 from app.models.attendance import AttendanceRecord, AttendanceStatus
@@ -36,7 +36,7 @@ from app.schemas.attendance import (
 class AttendanceService:
     """Attendance management service."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: Session):
         self.db = db
 
     def _record_to_response(self, record: AttendanceRecord) -> dict:
@@ -56,17 +56,17 @@ class AttendanceService:
             "updated_at": record.updated_at,
         }
 
-    async def create_record(
+    def create_record(
         self,
         project_id: int,
         request: AttendanceRecordCreate,
     ) -> AttendanceRecordResponse:
         """Create a single attendance record."""
         # Verify student exists and belongs to project
-        student = await self._get_student(project_id, request.student_id)
+        student = self._get_student(project_id, request.student_id)
         
         # Check for existing record
-        existing = await self._get_existing_record(
+        existing = self._get_existing_record(
             project_id, request.student_id, request.attendance_date
         )
         if existing:
@@ -82,14 +82,14 @@ class AttendanceService:
             remarks=request.remarks,
         )
         self.db.add(record)
-        await self.db.flush()
-        await self.db.refresh(record)
+        self.db.flush()
+        self.db.refresh(record)
 
         return AttendanceRecordResponse.model_validate(self._record_to_response(record))
 
-    async def _get_student(self, project_id: int, student_id: int) -> Student:
+    def _get_student(self, project_id: int, student_id: int) -> Student:
         """Get student by ID, validating project membership."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(Student).where(
                 Student.id == student_id,
                 Student.project_id == project_id,
@@ -100,11 +100,11 @@ class AttendanceService:
             raise NotFoundError("Student", str(student_id))
         return student
 
-    async def _get_existing_record(
+    def _get_existing_record(
         self, project_id: int, student_id: int, attendance_date: date
     ) -> AttendanceRecord | None:
         """Check for existing attendance record."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(AttendanceRecord).where(
                 AttendanceRecord.project_id == project_id,
                 AttendanceRecord.student_id == student_id,
@@ -113,13 +113,13 @@ class AttendanceService:
         )
         return result.scalar_one_or_none()
 
-    async def get_record(
+    def get_record(
         self,
         record_id: int,
         project_id: int,
     ) -> AttendanceRecord:
         """Get attendance record by ID."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(AttendanceRecord).where(
                 AttendanceRecord.id == record_id,
                 AttendanceRecord.project_id == project_id,
@@ -130,7 +130,7 @@ class AttendanceService:
             raise NotFoundError("Attendance record", str(record_id))
         return record
 
-    async def list_records(
+    def list_records(
         self,
         project_id: int,
         filters: AttendanceFilter | None = None,
@@ -166,7 +166,7 @@ class AttendanceService:
                     query = query.where(Student.section == filters.section)
 
         # Count total
-        count_result = await self.db.execute(
+        count_result = self.db.execute(
             select(func.count()).select_from(query.subquery())
         )
         total = count_result.scalar() or 0
@@ -179,7 +179,7 @@ class AttendanceService:
             .limit(page_size)
         )
 
-        result = await self.db.execute(query)
+        result = self.db.execute(query)
         records = result.scalars().all()
 
         return [
@@ -187,35 +187,35 @@ class AttendanceService:
             for r in records
         ], total
 
-    async def update_record(
+    def update_record(
         self,
         record_id: int,
         project_id: int,
         request: AttendanceRecordUpdate,
     ) -> AttendanceRecordResponse:
         """Update an attendance record."""
-        record = await self.get_record(record_id, project_id)
+        record = self.get_record(record_id, project_id)
 
         update_data = request.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             setattr(record, field, value)
 
-        await self.db.flush()
-        await self.db.refresh(record)
+        self.db.flush()
+        self.db.refresh(record)
 
         return AttendanceRecordResponse.model_validate(self._record_to_response(record))
 
-    async def delete_record(
+    def delete_record(
         self,
         record_id: int,
         project_id: int,
     ) -> None:
         """Delete an attendance record."""
-        record = await self.get_record(record_id, project_id)
-        await self.db.delete(record)
-        await self.db.flush()
+        record = self.get_record(record_id, project_id)
+        self.db.delete(record)
+        self.db.flush()
 
-    async def get_summary(
+    def get_summary(
         self,
         project_id: int,
         date_from: date,
@@ -245,7 +245,7 @@ class AttendanceService:
             if section:
                 query = query.where(Student.section == section)
 
-        result = await self.db.execute(query)
+        result = self.db.execute(query)
         row = result.one()
 
         return AttendanceSummary(
@@ -262,7 +262,7 @@ class AttendanceService:
     # Bulk Operations
     # ==========================================
 
-    async def bulk_create_or_update(
+    def bulk_create_or_update(
         self,
         project_id: int,
         request: BulkAttendanceCreate,
@@ -276,7 +276,7 @@ class AttendanceService:
         class_name, section = self._parse_class_section(request.class_section)
 
         # Get all students for the class
-        students = await self._get_students_by_class(project_id, class_name, section)
+        students = self._get_students_by_class(project_id, class_name, section)
         student_ids = {s.id for s in students}
 
         # Validate all student IDs before any DB operations
@@ -300,7 +300,7 @@ class AttendanceService:
         # All validations passed, proceed with DB operations
         for record in request.records:
             try:
-                existing = await self._get_existing_record(
+                existing = self._get_existing_record(
                     project_id, record.student_id, request.attendance_date
                 )
                 
@@ -327,7 +327,7 @@ class AttendanceService:
                 })
                 failed += 1
 
-        await self.db.flush()
+        self.db.flush()
 
         return BulkAttendanceResponse(
             total_records=len(request.records),
@@ -337,7 +337,7 @@ class AttendanceService:
             message=f"Successfully saved {successful} attendance records.",
         )
 
-    async def get_attendance_by_class_date(
+    def get_attendance_by_class_date(
         self,
         project_id: int,
         class_section: str,
@@ -347,10 +347,10 @@ class AttendanceService:
         class_name, section = self._parse_class_section(class_section)
 
         # Get all students in the class
-        students = await self._get_students_by_class(project_id, class_name, section)
+        students = self._get_students_by_class(project_id, class_name, section)
 
         # Get existing attendance records for the date
-        result = await self.db.execute(
+        result = self.db.execute(
             select(AttendanceRecord).where(
                 AttendanceRecord.project_id == project_id,
                 AttendanceRecord.attendance_date == attendance_date,
@@ -404,7 +404,7 @@ class AttendanceService:
     # Template Generation
     # ==========================================
 
-    async def generate_template(
+    def generate_template(
         self,
         project_id: int,
         class_section: str | None = None,
@@ -518,7 +518,7 @@ class AttendanceService:
         # Add students if class_section is provided
         if class_section:
             class_name, section = self._parse_class_section(class_section)
-            students = await self._get_students_by_class(project_id, class_name, section)
+            students = self._get_students_by_class(project_id, class_name, section)
 
             for row_idx, student in enumerate(students, start=3):
                 ws.cell(row=row_idx, column=1, value=student.student_name).border = thin_border
@@ -567,7 +567,7 @@ class AttendanceService:
     # Excel Upload Processing
     # ==========================================
 
-    async def process_excel_upload(
+    def process_excel_upload(
         self,
         project_id: int,
         file_content: bytes,
@@ -604,7 +604,7 @@ class AttendanceService:
             raise ValidationError("Could not parse date headers from template")
 
         # Get all students in project indexed by name (case-insensitive)
-        students_result = await self.db.execute(
+        students_result = self.db.execute(
             select(Student).where(Student.project_id == project_id)
         )
         students_by_name: dict[str, Student] = {}
@@ -708,7 +708,7 @@ class AttendanceService:
         for student, entries in rows_to_process:
             try:
                 for att_date, status in entries:
-                    existing = await self._get_existing_record(
+                    existing = self._get_existing_record(
                         project_id, student.id, att_date
                     )
                     
@@ -737,7 +737,7 @@ class AttendanceService:
                 ))
                 failed_rows += 1
 
-        await self.db.flush()
+        self.db.flush()
 
         # Log summary with counts per day
         total = successful_rows + failed_rows + skipped_rows
@@ -911,7 +911,7 @@ class AttendanceService:
             return parts[0], parts[1]
         return class_section, None
 
-    async def _get_students_by_class(
+    def _get_students_by_class(
         self, project_id: int, class_name: str, section: str | None = None
     ) -> list[Student]:
         """Get all students in a class, optionally filtered by section."""
@@ -923,12 +923,12 @@ class AttendanceService:
             query = query.where(Student.section == section)
         
         query = query.order_by(Student.student_name)
-        result = await self.db.execute(query)
+        result = self.db.execute(query)
         return list(result.scalars().all())
 
-    async def get_class_sections(self, project_id: int) -> list[dict]:
+    def get_class_sections(self, project_id: int) -> list[dict]:
         """Get distinct class-section combinations for a project."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(Student.class_name, Student.section, func.count(Student.id).label("count"))
             .where(Student.project_id == project_id)
             .group_by(Student.class_name, Student.section)

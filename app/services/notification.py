@@ -5,7 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
 from app.models.notification import Notification
@@ -20,10 +20,10 @@ from app.schemas.notification import (
 class NotificationService:
     """In-app notification service."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: Session):
         self.db = db
 
-    async def create_notification(
+    def create_notification(
         self,
         project_id: UUID,
         request: NotificationCreate,
@@ -39,18 +39,18 @@ class NotificationService:
             action_data=request.action_data,
         )
         self.db.add(notification)
-        await self.db.flush()
-        await self.db.refresh(notification)
+        self.db.flush()
+        self.db.refresh(notification)
 
         return NotificationResponse.model_validate(notification)
 
-    async def get_notification(
+    def get_notification(
         self,
         notification_id: UUID,
         user_id: UUID,
     ) -> Notification:
         """Get notification by ID (must belong to user)."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(Notification).where(
                 Notification.id == notification_id,
                 Notification.user_id == user_id,
@@ -61,7 +61,7 @@ class NotificationService:
             raise NotFoundError("Notification", str(notification_id))
         return notification
 
-    async def list_notifications(
+    def list_notifications(
         self,
         project_id: UUID,
         user_id: UUID,
@@ -82,7 +82,7 @@ class NotificationService:
                 query = query.where(Notification.notification_type == filters.notification_type)
 
         # Count total
-        count_result = await self.db.execute(
+        count_result = self.db.execute(
             select(func.count()).select_from(query.subquery())
         )
         total = count_result.scalar() or 0
@@ -95,18 +95,18 @@ class NotificationService:
             .limit(page_size)
         )
 
-        result = await self.db.execute(query)
+        result = self.db.execute(query)
         notifications = result.scalars().all()
 
         return [NotificationResponse.model_validate(n) for n in notifications], total
 
-    async def mark_as_read(
+    def mark_as_read(
         self,
         notification_ids: list[UUID],
         user_id: UUID,
     ) -> int:
         """Mark notifications as read. Returns count of updated."""
-        result = await self.db.execute(
+        result = self.db.execute(
             update(Notification)
             .where(
                 Notification.id.in_(notification_ids),
@@ -118,16 +118,16 @@ class NotificationService:
                 read_at=datetime.now(timezone.utc),
             )
         )
-        await self.db.flush()
+        self.db.flush()
         return result.rowcount
 
-    async def mark_all_as_read(
+    def mark_all_as_read(
         self,
         project_id: UUID,
         user_id: UUID,
     ) -> int:
         """Mark all notifications as read for a user."""
-        result = await self.db.execute(
+        result = self.db.execute(
             update(Notification)
             .where(
                 Notification.project_id == project_id,
@@ -139,16 +139,16 @@ class NotificationService:
                 read_at=datetime.now(timezone.utc),
             )
         )
-        await self.db.flush()
+        self.db.flush()
         return result.rowcount
 
-    async def get_stats(
+    def get_stats(
         self,
         project_id: UUID,
         user_id: UUID,
     ) -> NotificationStats:
         """Get notification statistics for a user."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(
                 func.count().label("total"),
                 func.sum(func.cast(Notification.is_read == False, Integer)).label("unread"),
@@ -169,20 +169,20 @@ class NotificationService:
             read=total - unread,
         )
 
-    async def delete_notification(
+    def delete_notification(
         self,
         notification_id: UUID,
         user_id: UUID,
     ) -> None:
         """Delete a notification."""
-        notification = await self.get_notification(notification_id, user_id)
-        await self.db.delete(notification)
-        await self.db.flush()
+        notification = self.get_notification(notification_id, user_id)
+        self.db.delete(notification)
+        self.db.flush()
 
 
 # Convenience functions for creating common notifications
-async def notify_upload_failed(
-    db: AsyncSession,
+def notify_upload_failed(
+    db: Session,
     project_id: UUID,
     user_id: UUID,
     upload_type: str,
@@ -191,7 +191,7 @@ async def notify_upload_failed(
 ) -> None:
     """Send notification for failed upload."""
     service = NotificationService(db)
-    await service.create_notification(
+    service.create_notification(
         project_id=project_id,
         request=NotificationCreate(
             user_id=user_id,
@@ -202,8 +202,8 @@ async def notify_upload_failed(
     )
 
 
-async def notify_task_assigned(
-    db: AsyncSession,
+def notify_task_assigned(
+    db: Session,
     project_id: UUID,
     user_id: UUID,
     task_title: str,
@@ -211,7 +211,7 @@ async def notify_task_assigned(
 ) -> None:
     """Send notification for task assignment."""
     service = NotificationService(db)
-    await service.create_notification(
+    service.create_notification(
         project_id=project_id,
         request=NotificationCreate(
             user_id=user_id,
@@ -222,8 +222,8 @@ async def notify_task_assigned(
     )
 
 
-async def notify_permission_changed(
-    db: AsyncSession,
+def notify_permission_changed(
+    db: Session,
     project_id: UUID,
     user_id: UUID,
     role_name: str,
@@ -231,7 +231,7 @@ async def notify_permission_changed(
 ) -> None:
     """Send notification for permission change."""
     service = NotificationService(db)
-    await service.create_notification(
+    service.create_notification(
         project_id=project_id,
         request=NotificationCreate(
             user_id=user_id,

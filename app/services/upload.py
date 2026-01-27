@@ -8,7 +8,7 @@ from typing import Any
 from uuid import UUID
 
 from openpyxl import load_workbook
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.exceptions import UploadError, ValidationError
@@ -24,10 +24,10 @@ logger = logging.getLogger(__name__)
 class UploadService:
     """Excel upload processing service."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: Session):
         self.db = db
 
-    async def process_attendance_upload(
+    def process_attendance_upload(
         self,
         project_id: UUID,
         user_id: UUID,
@@ -52,7 +52,7 @@ class UploadService:
             processing_started_at=datetime.now(timezone.utc),
         )
         self.db.add(upload)
-        await self.db.flush()
+        self.db.flush()
         logger.debug(f"[ATTENDANCE UPLOAD] Created upload record with ID: {upload.id}")
 
         try:
@@ -95,7 +95,7 @@ class UploadService:
 
             logger.info(f"[ATTENDANCE UPLOAD] Upload complete - Status: {upload.status.value}, Successful: {successful}, Failed: {len(errors)}, Total: {upload.total_rows}")
             
-            await self.db.flush()
+            self.db.flush()
             logger.debug(f"[ATTENDANCE UPLOAD] Database flush completed - records should be persisted")
 
             return UploadResult(
@@ -123,10 +123,10 @@ class UploadService:
             upload.status = UploadStatus.FAILED
             upload.error_message = str(e)
             upload.processing_completed_at = datetime.now(timezone.utc)
-            await self.db.flush()
+            self.db.flush()
             raise UploadError(f"Failed to process attendance upload: {str(e)}")
 
-    async def process_exam_upload(
+    def process_exam_upload(
         self,
         project_id: UUID,
         user_id: UUID,
@@ -148,7 +148,7 @@ class UploadService:
             processing_started_at=datetime.now(timezone.utc),
         )
         self.db.add(upload)
-        await self.db.flush()
+        self.db.flush()
 
         try:
             # Parse Excel file
@@ -185,7 +185,7 @@ class UploadService:
                 upload.error_message = f"Validation failed for {len(errors)} rows. Full rollback applied."
                 upload.processing_completed_at = datetime.now(timezone.utc)
 
-                await self.db.flush()
+                self.db.flush()
 
                 return UploadResult(
                     upload_id=upload.id,
@@ -217,7 +217,7 @@ class UploadService:
             upload.status = UploadStatus.SUCCESS
             upload.processing_completed_at = datetime.now(timezone.utc)
 
-            await self.db.flush()
+            self.db.flush()
 
             return UploadResult(
                 upload_id=upload.id,
@@ -233,7 +233,7 @@ class UploadService:
             upload.status = UploadStatus.FAILED
             upload.error_message = str(e)
             upload.processing_completed_at = datetime.now(timezone.utc)
-            await self.db.flush()
+            self.db.flush()
             raise UploadError(f"Failed to process exam upload: {str(e)}")
 
     def _parse_excel(self, file_content: bytes) -> list[dict[str, Any]]:

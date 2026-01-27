@@ -10,7 +10,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError, ValidationError
 from app.models.exam import ExamRecord
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 class ExamService:
     """Exam record management service."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: Session):
         self.db = db
 
     def _record_to_response(self, record: ExamRecord) -> dict:
@@ -61,7 +61,7 @@ class ExamService:
             "updated_at": record.updated_at,
         }
 
-    async def create_record(
+    def create_record(
         self,
         project_id: int,
         request: ExamRecordCreate,
@@ -74,10 +74,10 @@ class ExamService:
             )
 
         # Verify student exists and belongs to project
-        student = await self._get_student(project_id, request.student_id)
+        student = self._get_student(project_id, request.student_id)
 
         # Check for existing record (same student, exam, subject, AND date)
-        existing = await self._get_existing_record(
+        existing = self._get_existing_record(
             project_id, request.student_id, request.exam_name, request.subject, request.exam_date
         )
         if existing:
@@ -102,14 +102,14 @@ class ExamService:
             remarks=request.remarks,
         )
         self.db.add(record)
-        await self.db.flush()
-        await self.db.refresh(record)
+        self.db.flush()
+        self.db.refresh(record)
 
         return ExamRecordResponse.model_validate(self._record_to_response(record))
 
-    async def _get_student(self, project_id: int, student_id: int) -> Student:
+    def _get_student(self, project_id: int, student_id: int) -> Student:
         """Get student by ID, validating project membership."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(Student).where(
                 Student.id == student_id,
                 Student.project_id == project_id,
@@ -120,7 +120,7 @@ class ExamService:
             raise NotFoundError("Student", str(student_id))
         return student
 
-    async def _get_existing_record(
+    def _get_existing_record(
         self, project_id: int, student_id: int, exam_name: str, subject: str, exam_date: date | None = None
     ) -> ExamRecord | None:
         """Check for existing exam record.
@@ -136,7 +136,7 @@ class ExamService:
         )
         if exam_date is not None:
             query = query.where(ExamRecord.exam_date == exam_date)
-        result = await self.db.execute(query)
+        result = self.db.execute(query)
         return result.scalar_one_or_none()
 
     def _calculate_grade(self, marks_obtained: Decimal, max_marks: Decimal) -> str:
@@ -161,13 +161,13 @@ class ExamService:
         else:
             return "F"
 
-    async def get_record(
+    def get_record(
         self,
         record_id: int,
         project_id: int,
     ) -> ExamRecord:
         """Get exam record by ID."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(ExamRecord).where(
                 ExamRecord.id == record_id,
                 ExamRecord.project_id == project_id,
@@ -178,7 +178,7 @@ class ExamService:
             raise NotFoundError("Exam record", str(record_id))
         return record
 
-    async def list_records(
+    def list_records(
         self,
         project_id: int,
         filters: ExamFilter | None = None,
@@ -220,7 +220,7 @@ class ExamService:
                     query = query.where(Student.section == filters.section)
 
         # Count total
-        count_result = await self.db.execute(
+        count_result = self.db.execute(
             select(func.count()).select_from(query.subquery())
         )
         total = count_result.scalar() or 0
@@ -233,19 +233,19 @@ class ExamService:
             .limit(page_size)
         )
 
-        result = await self.db.execute(query)
+        result = self.db.execute(query)
         records = result.scalars().all()
 
         return [ExamRecordResponse.model_validate(self._record_to_response(r)) for r in records], total
 
-    async def update_record(
+    def update_record(
         self,
         record_id: int,
         project_id: int,
         request: ExamRecordUpdate,
     ) -> ExamRecordResponse:
         """Update an exam record."""
-        record = await self.get_record(record_id, project_id)
+        record = self.get_record(record_id, project_id)
 
         # Get max_marks for validation
         max_marks = request.max_marks if request.max_marks is not None else record.max_marks
@@ -265,22 +265,22 @@ class ExamService:
         if request.marks_obtained is not None and request.grade is None:
             record.grade = self._calculate_grade(record.marks_obtained, record.max_marks)
 
-        await self.db.flush()
-        await self.db.refresh(record)
+        self.db.flush()
+        self.db.refresh(record)
 
         return ExamRecordResponse.model_validate(self._record_to_response(record))
 
-    async def delete_record(
+    def delete_record(
         self,
         record_id: int,
         project_id: int,
     ) -> None:
         """Delete an exam record."""
-        record = await self.get_record(record_id, project_id)
-        await self.db.delete(record)
-        await self.db.flush()
+        record = self.get_record(record_id, project_id)
+        self.db.delete(record)
+        self.db.flush()
 
-    async def get_exam_summary(
+    def get_exam_summary(
         self,
         project_id: int,
         exam_name: str,
@@ -301,11 +301,11 @@ class ExamService:
             ExamRecord.subject == subject,
         )
 
-        result = await self.db.execute(query)
+        result = self.db.execute(query)
         row = result.one()
 
         # Count pass/fail
-        pass_count_result = await self.db.execute(
+        pass_count_result = self.db.execute(
             select(func.count()).where(
                 ExamRecord.project_id == project_id,
                 ExamRecord.exam_name == exam_name,
@@ -333,7 +333,7 @@ class ExamService:
     # Bulk Operations
     # ==========================================
 
-    async def bulk_create_or_update(
+    def bulk_create_or_update(
         self,
         project_id: int,
         request: BulkExamCreate,
@@ -347,7 +347,7 @@ class ExamService:
         class_name, section = self._parse_class_section(request.class_section)
 
         # Get all students for the class
-        students = await self._get_students_by_class(project_id, class_name, section)
+        students = self._get_students_by_class(project_id, class_name, section)
         student_ids = {s.id for s in students}
 
         # Validate all student IDs before any DB operations
@@ -380,7 +380,7 @@ class ExamService:
                     failed += 1
                     continue
 
-                existing = await self._get_existing_record(
+                existing = self._get_existing_record(
                     project_id, record.student_id, request.exam_name, request.subject, request.exam_date
                 )
 
@@ -419,7 +419,7 @@ class ExamService:
                 })
                 failed += 1
 
-        await self.db.flush()
+        self.db.flush()
 
         return BulkExamResponse(
             total_records=len(request.records),
@@ -429,7 +429,7 @@ class ExamService:
             message=f"Successfully saved {successful} exam records.",
         )
 
-    async def get_exam_by_class(
+    def get_exam_by_class(
         self,
         project_id: int,
         class_section: str,
@@ -440,10 +440,10 @@ class ExamService:
         class_name, section = self._parse_class_section(class_section)
 
         # Get all students in the class
-        students = await self._get_students_by_class(project_id, class_name, section)
+        students = self._get_students_by_class(project_id, class_name, section)
 
         # Get existing exam records
-        result = await self.db.execute(
+        result = self.db.execute(
             select(ExamRecord).where(
                 ExamRecord.project_id == project_id,
                 ExamRecord.exam_name == exam_name,
@@ -496,9 +496,9 @@ class ExamService:
             lowest_marks=lowest,
         )
 
-    async def get_exam_names(self, project_id: int) -> list[str]:
+    def get_exam_names(self, project_id: int) -> list[str]:
         """Get distinct exam names for a project."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(ExamRecord.exam_name)
             .where(ExamRecord.project_id == project_id)
             .distinct()
@@ -506,13 +506,13 @@ class ExamService:
         )
         return [r[0] for r in result.all()]
 
-    async def get_subjects(self) -> list[str]:
+    def get_subjects(self) -> list[str]:
         """Get list of available subjects."""
         return SUBJECTS
 
-    async def get_class_sections(self, project_id: int) -> list[dict]:
+    def get_class_sections(self, project_id: int) -> list[dict]:
         """Get distinct class-section combinations for a project."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(Student.class_name, Student.section, func.count(Student.id).label("count"))
             .where(Student.project_id == project_id)
             .group_by(Student.class_name, Student.section)
@@ -533,7 +533,7 @@ class ExamService:
     # Template Generation
     # ==========================================
 
-    async def generate_template(
+    def generate_template(
         self,
         project_id: int,
         class_section: str | None = None,
@@ -607,7 +607,7 @@ class ExamService:
         start_row = 3
         if class_section:
             class_name, section = self._parse_class_section(class_section)
-            students = await self._get_students_by_class(project_id, class_name, section)
+            students = self._get_students_by_class(project_id, class_name, section)
 
             default_exam_name = f"{month_name} {year} Exam"
             default_exam_date = f"{year}-{month:02d}-01"
@@ -699,7 +699,7 @@ class ExamService:
     # Excel Upload Processing
     # ==========================================
 
-    async def process_excel_upload(
+    def process_excel_upload(
         self,
         project_id: int,
         file_content: bytes,
@@ -725,7 +725,7 @@ class ExamService:
         logger.info(f"[EXAM UPLOAD] Headers: {headers}")
 
         # Get all students in project indexed by name (case-insensitive)
-        students_result = await self.db.execute(
+        students_result = self.db.execute(
             select(Student).where(Student.project_id == project_id)
         )
         students_by_name: dict[str, Student] = {}
@@ -890,7 +890,7 @@ class ExamService:
 
                 # Check for existing record and update or create
                 # Uniqueness includes exam_date, so same exam type on different dates creates new records
-                existing = await self._get_existing_record(
+                existing = self._get_existing_record(
                     project_id, student.id, exam_name, subject, exam_date
                 )
 
@@ -926,7 +926,7 @@ class ExamService:
                 ))
                 failed_rows += 1
 
-        await self.db.flush()
+        self.db.flush()
 
         total = successful_rows + failed_rows + skipped_rows
         logger.info(f"[EXAM UPLOAD] Completed: {successful_rows} OK, {failed_rows} failed, {skipped_rows} skipped")
@@ -951,7 +951,7 @@ class ExamService:
             return parts[0], parts[1]
         return class_section, None
 
-    async def _get_students_by_class(
+    def _get_students_by_class(
         self, project_id: int, class_name: str, section: str | None = None
     ) -> list[Student]:
         """Get all students in a class, optionally filtered by section."""
@@ -963,5 +963,5 @@ class ExamService:
             query = query.where(Student.section == section)
 
         query = query.order_by(Student.student_name)
-        result = await self.db.execute(query)
+        result = self.db.execute(query)
         return list(result.scalars().all())

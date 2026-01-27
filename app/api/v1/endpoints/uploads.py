@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
@@ -30,9 +30,9 @@ router = APIRouter()
 
 
 @router.post("/attendance", response_model=UploadResult)
-async def upload_attendance(
+def upload_attendance(
     context: Annotated[ProjectContext, Depends(require_permission("attendance:upload"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
     file: UploadFile = File(...),
 ):
@@ -52,12 +52,12 @@ async def upload_attendance(
     if not file.filename.endswith(".xlsx"):
         raise UploadError("Only .xlsx files are allowed")
 
-    content = await file.read()
+    content = file.file.read()
     if len(content) > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
         raise UploadError(f"File size exceeds {settings.MAX_UPLOAD_SIZE_MB}MB limit")
 
     service = UploadService(db)
-    result = await service.process_attendance_upload(
+    result = service.process_attendance_upload(
         project_id=context.project_id,
         user_id=context.user_id,
         file_content=content,
@@ -67,7 +67,7 @@ async def upload_attendance(
     # Audit log
     audit = AuditService(db)
     action = AuditAction.UPLOAD_COMPLETED if result.status == UploadStatus.SUCCESS else AuditAction.UPLOAD_FAILED
-    await audit.log(
+    audit.log(
         action=action,
         resource_type="upload",
         resource_id=str(result.upload_id),
@@ -85,7 +85,7 @@ async def upload_attendance(
 
     # Notify on failure
     if result.status == UploadStatus.FAILED:
-        await notify_upload_failed(
+        notify_upload_failed(
             db,
             context.project_id,
             context.user_id,
@@ -98,9 +98,9 @@ async def upload_attendance(
 
 
 @router.post("/exams", response_model=UploadResult)
-async def upload_exams(
+def upload_exams(
     context: Annotated[ProjectContext, Depends(require_permission("exam:upload"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     http_request: Request,
     file: UploadFile = File(...),
 ):
@@ -123,12 +123,12 @@ async def upload_exams(
     if not file.filename.endswith(".xlsx"):
         raise UploadError("Only .xlsx files are allowed")
 
-    content = await file.read()
+    content = file.file.read()
     if len(content) > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
         raise UploadError(f"File size exceeds {settings.MAX_UPLOAD_SIZE_MB}MB limit")
 
     service = UploadService(db)
-    result = await service.process_exam_upload(
+    result = service.process_exam_upload(
         project_id=context.project_id,
         user_id=context.user_id,
         file_content=content,
@@ -138,7 +138,7 @@ async def upload_exams(
     # Audit log
     audit = AuditService(db)
     action = AuditAction.UPLOAD_COMPLETED if result.status == UploadStatus.SUCCESS else AuditAction.UPLOAD_FAILED
-    await audit.log(
+    audit.log(
         action=action,
         resource_type="upload",
         resource_id=str(result.upload_id),
@@ -156,7 +156,7 @@ async def upload_exams(
 
     # Notify on failure
     if result.status == UploadStatus.FAILED:
-        await notify_upload_failed(
+        notify_upload_failed(
             db,
             context.project_id,
             context.user_id,
@@ -169,9 +169,9 @@ async def upload_exams(
 
 
 @router.get("", response_model=PaginatedResponse[UploadWithDetails])
-async def list_uploads(
+def list_uploads(
     context: ProjectContext,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
     upload_type: UploadType | None = None,
     status: UploadStatus | None = None,
     page: int = Query(1, ge=1),
@@ -194,7 +194,7 @@ async def list_uploads(
         query = query.where(Upload.status == status)
 
     # Count total
-    count_result = await db.execute(
+    count_result = db.execute(
         select(func.count()).select_from(query.subquery())
     )
     total = count_result.scalar() or 0
@@ -207,7 +207,7 @@ async def list_uploads(
         .limit(page_size)
     )
 
-    result = await db.execute(query)
+    result = db.execute(query)
     uploads = result.scalars().all()
 
     items = [
@@ -254,17 +254,17 @@ async def list_uploads(
 
 
 @router.get("/{upload_id}", response_model=UploadWithDetails)
-async def get_upload(
+def get_upload(
     upload_id: UUID,
     context: ProjectContext,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     Get upload details by ID with error information.
     """
     from app.core.exceptions import NotFoundError
 
-    result = await db.execute(
+    result = db.execute(
         select(Upload)
         .options(selectinload(Upload.uploaded_by), selectinload(Upload.errors))
         .where(

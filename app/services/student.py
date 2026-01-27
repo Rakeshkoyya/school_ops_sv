@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from openpyxl import Workbook, load_workbook
 from sqlalchemy import func, select, or_
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError, ValidationError
 from app.models.student import Student
@@ -32,10 +32,10 @@ STUDENT_TEMPLATE_COLUMNS = [
 class StudentService:
     """Student management service."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: Session):
         self.db = db
 
-    async def create_student(
+    def create_student(
         self,
         project_id: int,
         request: StudentCreate,
@@ -50,13 +50,13 @@ class StudentService:
             parent_phone_no=request.parent_phone_no,
         )
         self.db.add(student)
-        await self.db.flush()
-        await self.db.refresh(student)
+        self.db.flush()
+        self.db.refresh(student)
         return StudentResponse.model_validate(student)
 
-    async def get_student(self, project_id: int, student_id: int) -> Student:
+    def get_student(self, project_id: int, student_id: int) -> Student:
         """Get student by ID."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(Student).where(
                 Student.id == student_id,
                 Student.project_id == project_id,
@@ -67,28 +67,28 @@ class StudentService:
             raise NotFoundError("Student", str(student_id))
         return student
 
-    async def update_student(
+    def update_student(
         self,
         project_id: int,
         student_id: int,
         request: StudentUpdate,
     ) -> StudentResponse:
         """Update a student."""
-        student = await self.get_student(project_id, student_id)
+        student = self.get_student(project_id, student_id)
         update_data = request.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             setattr(student, field, value)
-        await self.db.flush()
-        await self.db.refresh(student)
+        self.db.flush()
+        self.db.refresh(student)
         return StudentResponse.model_validate(student)
 
-    async def delete_student(self, project_id: int, student_id: int) -> None:
+    def delete_student(self, project_id: int, student_id: int) -> None:
         """Delete a student."""
-        student = await self.get_student(project_id, student_id)
-        await self.db.delete(student)
-        await self.db.flush()
+        student = self.get_student(project_id, student_id)
+        self.db.delete(student)
+        self.db.flush()
 
-    async def list_students(
+    def list_students(
         self,
         project_id: int,
         filters: StudentFilter | None = None,
@@ -114,7 +114,7 @@ class StudentService:
 
         # Get total count
         count_query = select(func.count()).select_from(query.subquery())
-        total_result = await self.db.execute(count_query)
+        total_result = self.db.execute(count_query)
         total = total_result.scalar() or 0
 
         # Apply pagination
@@ -122,7 +122,7 @@ class StudentService:
         query = query.order_by(Student.class_name, Student.section, Student.student_name)
         query = query.offset(offset).limit(page_size)
 
-        result = await self.db.execute(query)
+        result = self.db.execute(query)
         students = result.scalars().all()
 
         return PaginatedStudentResponse(
@@ -160,7 +160,7 @@ class StudentService:
         output.seek(0)
         return output.getvalue()
 
-    async def bulk_upload(
+    def bulk_upload(
         self,
         project_id: int,
         file_content: bytes,
@@ -222,7 +222,7 @@ class StudentService:
                     "message": str(e),
                 })
 
-        await self.db.flush()
+        self.db.flush()
 
         total = len([r for r in rows if any(r)])
         message = f"Uploaded {successful} of {total} students."
@@ -237,9 +237,9 @@ class StudentService:
             message=message,
         )
 
-    async def get_class_sections(self, project_id: int) -> list[dict]:
+    def get_class_sections(self, project_id: int) -> list[dict]:
         """Get distinct class-section combinations for a project."""
-        result = await self.db.execute(
+        result = self.db.execute(
             select(Student.class_name, Student.section)
             .where(Student.project_id == project_id)
             .distinct()
