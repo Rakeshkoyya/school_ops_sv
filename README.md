@@ -1,106 +1,79 @@
-# School Agent Backend
+# School Ops Backend
 
-Multi-tenant school management system built with FastAPI and PostgreSQL.
+FastAPI backend for the School Operations management system.
 
-## Features
+> 📖 **For complete setup instructions, see the main [README.md](../README.md) in the project root.**
 
-- **Multi-School Support**: Each school is a separate project (tenant)
-- **Role-Based Access Control (RBAC)**: Granular permissions system
-- **Attendance Management**: Track student attendance with Excel upload
-- **Exam Management**: Record and analyze exam results with strict validation
-- **Task Management**: Assign and track tasks to users or roles
-- **Audit Logging**: Complete, append-only action history
-- **In-App Notifications**: User notifications for important events
+## Quick Reference
 
-## Tech Stack
+### Development Commands
 
-- **Framework**: FastAPI (Python 3.11+)
-- **Database**: PostgreSQL with SQLAlchemy async ORM
-- **Authentication**: JWT (stateless)
-- **File Handling**: Excel (XLSX only) via openpyxl
-- **Package Manager**: UV
+```powershell
+# Install dependencies
+uv sync
 
-## Project Structure
+# Run migrations
+uv run alembic upgrade head
+
+# Start development server
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# Start PostgreSQL (Docker)
+docker-compose up -d
+```
+
+### Project Structure
 
 ```
 backend/
 ├── alembic/                 # Database migrations
-│   ├── versions/           # Migration files
-│   └── env.py              # Alembic environment
+│   └── versions/           # Migration files
 ├── app/
-│   ├── api/                # API routers
-│   │   └── v1/
-│   │       ├── endpoints/  # Route handlers
-│   │       └── router.py   # Main router
-│   ├── core/               # Core utilities
-│   │   ├── config.py       # Settings
-│   │   ├── database.py     # DB connection
-│   │   ├── dependencies.py # FastAPI dependencies
-│   │   ├── exceptions.py   # Custom exceptions
-│   │   └── security.py     # Auth utilities
+│   ├── api/v1/             # API routers & endpoints
+│   ├── core/               # Config, DB, security
 │   ├── middleware/         # Custom middleware
 │   ├── models/             # SQLAlchemy models
 │   ├── schemas/            # Pydantic schemas
 │   ├── services/           # Business logic
 │   └── main.py             # Application entry
+├── .env.example            # Environment template
 ├── alembic.ini             # Alembic config
-├── pyproject.toml          # Project dependencies
-└── README.md
+├── docker-compose.yml      # PostgreSQL container
+└── pyproject.toml          # Dependencies
 ```
 
-## Quick Start
+### API Documentation
 
-### Prerequisites
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
 
-- Python 3.11+
-- PostgreSQL 14+
-- UV package manager
+### Useful Commands
 
-### Installation
+```powershell
+# Create new migration
+uv run alembic revision --autogenerate -m "description"
 
-1. **Install UV** (if not already installed):
-   ```powershell
-   pip install uv
-   ```
+# Downgrade migration
+uv run alembic downgrade -1
 
-2. **Clone and navigate to the project**:
-   ```powershell
-   cd backend
-   ```
+# Check migration status
+uv run alembic current
 
-3. **Create virtual environment and install dependencies**:
-   ```powershell
-   uv venv
-   .\.venv\Scripts\activate
-   uv sync
-   ```
+# Run linting
+uv run ruff check .
 
-4. **Set up environment variables**:
-   ```powershell
-   Copy-Item .env.example .env
-   # Edit .env with your database credentials and secret key
-   ```
+# Run type checking
+uv run mypy app
+```
 
-5. **Create the database**:
-   ```powershell
-   # Using psql or pgAdmin, create database:
-   # CREATE DATABASE school_agent;
-   ```
+### Environment Variables
 
-6. **Run database migrations**:
-   ```powershell
-   alembic upgrade head
-   ```
+See `.env.example` for all available configuration options.
 
-7. **Start the development server**:
-   ```powershell
-   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-   ```
-
-8. **Access the API**:
-   - API: http://localhost:8000
-   - Swagger UI: http://localhost:8000/docs
-   - ReDoc: http://localhost:8000/redoc
+Key variables:
+- `DATABASE_URL` - PostgreSQL connection string
+- `JWT_SECRET_KEY` - Secret for JWT tokens (change in production!)
+- `DEBUG` - Enable debug mode (set to `false` in production)
 
 ## API Overview
 
