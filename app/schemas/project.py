@@ -17,6 +17,7 @@ class ProjectCreate(BaseSchema):
     theme_color: str | None = Field(None, pattern=r"^#[0-9A-Fa-f]{6}$")
     logo_url: str | None = None
     add_default_roles: bool = Field(default=True, description="Create default School Admin and Staff roles")
+    default_evo_points: int = Field(default=0, ge=0, description="Default evo points for tasks in this project")
 
 
 class ProjectUpdate(BaseSchema):
@@ -27,6 +28,7 @@ class ProjectUpdate(BaseSchema):
     theme_color: str | None = Field(None, pattern=r"^#[0-9A-Fa-f]{6}$")
     logo_url: str | None = None
     status: ProjectStatus | None = None
+    default_evo_points: int | None = Field(None, ge=0)
 
 
 class ProjectResponse(BaseSchema):
@@ -39,6 +41,7 @@ class ProjectResponse(BaseSchema):
     theme_color: str | None
     logo_url: str | None
     status: ProjectStatus
+    default_evo_points: int = 0
     created_at: datetime
     updated_at: datetime
 

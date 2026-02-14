@@ -12,6 +12,7 @@ from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.database import engine
 from app.core.exceptions import AppException
+from app.core.scheduler import start_scheduler, stop_scheduler
 from app.middleware.logging import RequestLoggingMiddleware
 from app.middleware.project_status import ProjectStatusMiddleware
 
@@ -34,7 +35,15 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
+    
+    # Start the scheduler for recurring tasks
+    start_scheduler()
+    
     yield
+    
+    # Stop the scheduler gracefully
+    stop_scheduler()
+    
     logger.info("Shutting down application")
     engine.dispose()
 
@@ -106,6 +115,25 @@ All errors follow a standard format:
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        # Convert errors to JSON-serializable format
+        errors = []
+        for error in exc.errors():
+            # Create a clean copy of the error dict
+            clean_error = {
+                "type": error.get("type"),
+                "loc": error.get("loc"),
+                "msg": error.get("msg"),
+            }
+            # Convert input to string if it's not serializable
+            if "input" in error:
+                try:
+                    import json
+                    json.dumps(error["input"])
+                    clean_error["input"] = error["input"]
+                except (TypeError, ValueError):
+                    clean_error["input"] = str(error["input"])
+            errors.append(clean_error)
+        
         return JSONResponse(
             status_code=422,
             content={
@@ -113,7 +141,7 @@ All errors follow a standard format:
                 "error": {
                     "code": "VALIDATION_ERROR",
                     "message": "Request validation failed",
-                    "details": {"errors": exc.errors()},
+                    "details": {"errors": errors},
                 },
             },
         )

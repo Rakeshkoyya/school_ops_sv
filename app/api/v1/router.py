@@ -6,12 +6,14 @@ from app.api.v1.endpoints import (
     attendance,
     audit,
     auth,
+    evo_points,
     exams,
     notifications,
     projects,
     roles,
     students,
     tasks,
+    task_views,
     uploads,
 )
 
@@ -52,6 +54,13 @@ api_router.include_router(
     tags=["Tasks"],
 )
 
+# Task Views (project-scoped)
+api_router.include_router(
+    task_views.router,
+    prefix="/task-views",
+    tags=["Task Views"],
+)
+
 # Attendance (project-scoped)
 api_router.include_router(
     attendance.router,
@@ -85,4 +94,11 @@ api_router.include_router(
     notifications.router,
     prefix="/notifications",
     tags=["Notifications"],
+)
+
+# Evo Points (project-scoped)
+api_router.include_router(
+    evo_points.router,
+    prefix="/evo-points",
+    tags=["Evo Points"],
 )

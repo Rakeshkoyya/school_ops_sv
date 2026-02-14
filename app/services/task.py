@@ -1,14 +1,19 @@
 """Task management service with timer support."""
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 
 from sqlalchemy import and_, func, or_, select
+
+# IST timezone (UTC+5:30)
+IST = timezone(timedelta(hours=5, minutes=30))
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
+from app.models.evo_point import EvoPointTransaction, EvoTransactionType
+from app.models.project import Project
 from app.models.rbac import Role, UserRoleProject
-from app.models.task import Task, TaskCategory, TaskStatus
+from app.models.task import EvoReductionType, Task, TaskCategory, TaskStatus
 from app.models.user import User
 from app.schemas.task import (
     StaffTasksSummary,
@@ -123,16 +128,32 @@ class TaskService:
         if request.assigned_to_role_id:
             self._verify_role_in_project(request.assigned_to_role_id, project_id)
 
+        # Handle due_datetime - treat naive datetime as IST
+        due_datetime = request.due_datetime
+        if due_datetime and due_datetime.tzinfo is None:
+            # Input is naive - treat as IST
+            due_datetime = due_datetime.replace(tzinfo=IST)
+
+        # Handle evo_extension_end - treat naive datetime as IST
+        evo_extension_end = request.evo_extension_end
+        if evo_extension_end and evo_extension_end.tzinfo is None:
+            evo_extension_end = evo_extension_end.replace(tzinfo=IST)
+
         task = Task(
             project_id=project_id,
             category_id=request.category_id,
             title=request.title,
             description=request.description,
             status=TaskStatus.PENDING,
-            due_date=request.due_date,
+            due_datetime=due_datetime,
             assigned_to_user_id=assigned_user_id,
             assigned_to_role_id=request.assigned_to_role_id,
             created_by_id=user_id,
+            # Evo Points fields
+            evo_points=request.evo_points,
+            evo_reduction_type=request.evo_reduction_type or EvoReductionType.NONE,
+            evo_extension_end=evo_extension_end,
+            evo_fixed_reduction_points=request.evo_fixed_reduction_points,
         )
         self.db.add(task)
         self.db.flush()
@@ -173,7 +194,12 @@ class TaskService:
         user_id: int,
         include_role_tasks: bool = True,
     ) -> list[TaskWithDetails]:
-        """Get tasks assigned to the current user (directly or via role)."""
+        """Get tasks assigned to the current user (directly or via role).
+        
+        Includes:
+        - All pending, in_progress, and overdue tasks
+        - Tasks completed TODAY (so users can see recent accomplishments)
+        """
         conditions = [Task.assigned_to_user_id == user_id]
 
         if include_role_tasks:
@@ -187,6 +213,18 @@ class TaskService:
             if role_ids:
                 conditions.append(Task.assigned_to_role_id.in_(role_ids))
 
+        # Get today's start in IST
+        today_start = datetime.now(IST).replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # Status conditions: pending/in_progress/overdue OR completed today
+        status_conditions = or_(
+            Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.OVERDUE]),
+            and_(
+                Task.status == TaskStatus.DONE,
+                Task.end_time >= today_start,  # Completed today
+            ),
+        )
+
         query = (
             select(Task)
             .options(
@@ -197,10 +235,15 @@ class TaskService:
             )
             .where(
                 Task.project_id == project_id,
-                Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.OVERDUE]),
+                status_conditions,
                 or_(*conditions),
             )
-            .order_by(Task.due_date.asc().nullslast(), Task.created_at.desc())
+            .order_by(
+                # Sort: non-done first, then by due date
+                Task.status == TaskStatus.DONE,  # Done tasks at bottom
+                Task.due_datetime.asc().nullslast(),
+                Task.created_at.desc(),
+            )
         )
 
         result = self.db.execute(query)
@@ -261,7 +304,7 @@ class TaskService:
                 Task.project_id == project_id,
                 Task.assigned_to_user_id == staff_user_id,
             )
-            .order_by(Task.due_date.asc().nullslast(), Task.created_at.desc())
+            .order_by(Task.due_datetime.asc().nullslast(), Task.created_at.desc())
         )
 
         result = self.db.execute(query)
@@ -269,13 +312,15 @@ class TaskService:
         enriched_tasks = [self._enrich_task(t) for t in tasks]
 
         # Calculate counts
-        today = date.today()
+        today = datetime.now(IST).date()
         pending_count = sum(1 for t in enriched_tasks if t.status == TaskStatus.PENDING)
         in_progress_count = sum(1 for t in enriched_tasks if t.status == TaskStatus.IN_PROGRESS)
         overdue_count = sum(1 for t in enriched_tasks if t.is_overdue)
         completed_today_count = sum(
             1 for t in enriched_tasks
-            if t.status == TaskStatus.DONE and t.end_time and t.end_time.date() == today
+            if t.status == TaskStatus.DONE and t.end_time and (
+                t.end_time.astimezone(IST).date() if t.end_time.tzinfo else t.end_time.date()
+            ) == today
         )
 
         return StaffTasksSummary(
@@ -308,14 +353,14 @@ class TaskService:
             if filters.assigned_to_role_id:
                 query = query.where(Task.assigned_to_role_id == filters.assigned_to_role_id)
             if filters.due_before:
-                query = query.where(Task.due_date <= filters.due_before)
+                query = query.where(Task.due_datetime <= filters.due_before)
             if filters.due_after:
-                query = query.where(Task.due_date >= filters.due_after)
+                query = query.where(Task.due_datetime >= filters.due_after)
             if filters.is_overdue:
-                today = date.today()
+                now_ist = datetime.now(IST)
                 query = query.where(
                     and_(
-                        Task.due_date < today,
+                        Task.due_datetime < now_ist,  # Compare with IST datetime
                         Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS]),
                     )
                 )
@@ -368,6 +413,12 @@ class TaskService:
         if "category_id" in update_data and update_data["category_id"]:
             self.get_category(update_data["category_id"], project_id)
 
+        # Handle due_datetime - treat naive datetime as IST
+        if "due_datetime" in update_data and update_data["due_datetime"]:
+            due_dt = update_data["due_datetime"]
+            if isinstance(due_dt, datetime) and due_dt.tzinfo is None:
+                update_data["due_datetime"] = due_dt.replace(tzinfo=IST)
+
         for field, value in update_data.items():
             setattr(task, field, value)
 
@@ -391,7 +442,7 @@ class TaskService:
         if task.status == TaskStatus.DONE:
             raise ValidationError("Cannot start a completed task")
 
-        task.start_time = datetime.now(timezone.utc)
+        task.start_time = datetime.now(IST)  # Store with IST timezone
         task.status = TaskStatus.IN_PROGRESS
         self.db.flush()
         self.db.refresh(task)
@@ -410,7 +461,7 @@ class TaskService:
         if task.assigned_to_user_id != user_id:
             raise ForbiddenError("You can only complete tasks assigned to you")
 
-        task.end_time = datetime.now(timezone.utc)
+        task.end_time = datetime.now(IST)  # Store with IST timezone
         task.status = TaskStatus.DONE
         self.db.flush()
         self.db.refresh(task)
@@ -432,9 +483,9 @@ class TaskService:
 
         task.status = status
         if status == TaskStatus.IN_PROGRESS and not task.start_time:
-            task.start_time = datetime.now(timezone.utc)
+            task.start_time = datetime.now(IST)  # Store with IST timezone
         elif status == TaskStatus.DONE:
-            task.end_time = datetime.now(timezone.utc)
+            task.end_time = datetime.now(IST)  # Store with IST timezone
 
         self.db.flush()
         self.db.refresh(task)
@@ -484,27 +535,36 @@ class TaskService:
 
     def _enrich_task(self, task: Task) -> TaskWithDetails:
         """Enrich task with related names and computed fields."""
-        today = date.today()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(IST)
+        
+        # Helper to ensure datetime is timezone-aware (IST) for comparison
+        def make_aware(dt: datetime | None) -> datetime | None:
+            if dt is None:
+                return None
+            if dt.tzinfo is None:
+                # Treat naive datetimes as IST (as they come from user input in IST)
+                return dt.replace(tzinfo=IST)
+            return dt
+        
+        due_dt = make_aware(task.due_datetime)
+        start_dt = make_aware(task.start_time)
         
         is_overdue = (
-            task.due_date is not None
-            and task.due_date < today
+            due_dt is not None
+            and due_dt < now
             and task.status in [TaskStatus.PENDING, TaskStatus.IN_PROGRESS]
         )
 
         # Calculate elapsed time if task is in progress
         elapsed_seconds = None
-        if task.start_time and task.status == TaskStatus.IN_PROGRESS:
-            elapsed = now - task.start_time
+        if start_dt and task.status == TaskStatus.IN_PROGRESS:
+            elapsed = now - start_dt
             elapsed_seconds = int(elapsed.total_seconds())
 
-        # Calculate time remaining until due_date (in seconds)
+        # Calculate time remaining until due_datetime (in seconds)
         time_remaining_seconds = None
-        if task.due_date and task.status not in [TaskStatus.DONE, TaskStatus.CANCELLED]:
-            # Due date is end of day
-            due_datetime = datetime.combine(task.due_date, datetime.max.time()).replace(tzinfo=timezone.utc)
-            remaining = due_datetime - now
+        if due_dt and task.status not in [TaskStatus.DONE, TaskStatus.CANCELLED]:
+            remaining = due_dt - now
             time_remaining_seconds = int(remaining.total_seconds())
 
         return TaskWithDetails(
@@ -516,10 +576,11 @@ class TaskService:
             status=task.status,
             start_time=task.start_time,
             end_time=task.end_time,
-            due_date=task.due_date,
+            due_datetime=task.due_datetime,
             assigned_to_user_id=task.assigned_to_user_id,
             assigned_to_role_id=task.assigned_to_role_id,
             auto_rule_key=task.auto_rule_key,
+            recurring_template_id=task.recurring_template_id,
             created_by_id=task.created_by_id,
             created_at=task.created_at,
             updated_at=task.updated_at,
@@ -530,7 +591,92 @@ class TaskService:
             is_overdue=is_overdue,
             time_remaining_seconds=time_remaining_seconds,
             elapsed_seconds=elapsed_seconds,
+            # Evo Points fields
+            evo_points=task.evo_points,
+            evo_reduction_type=task.evo_reduction_type,
+            evo_extension_end=task.evo_extension_end,
+            evo_fixed_reduction_points=task.evo_fixed_reduction_points,
+            effective_evo_points=self._get_effective_evo_points(task),
+            current_reward_points=self._calculate_current_reward_points(task, now) if task.status != TaskStatus.DONE else None,
+            earned_evo_points=self._get_earned_evo_points(task) if task.status == TaskStatus.DONE else None,
         )
+
+    def _get_earned_evo_points(self, task: Task) -> int | None:
+        """Get the evo points earned for a completed task from transactions."""
+        if task.assigned_to_user_id is None:
+            return None
+        
+        # Look up the transaction for this task
+        transaction = self.db.execute(
+            select(EvoPointTransaction)
+            .where(
+                EvoPointTransaction.task_id == task.id,
+                EvoPointTransaction.transaction_type == EvoTransactionType.TASK_REWARD,
+            )
+        ).scalar_one_or_none()
+        
+        if transaction:
+            return transaction.amount
+        return None
+
+    def _get_effective_evo_points(self, task: Task) -> int:
+        """Get effective evo points for a task (task value or project default)."""
+        if task.evo_points is not None:
+            return task.evo_points
+        project = self.db.get(Project, task.project_id)
+        if project:
+            return project.default_evo_points
+        return 0
+
+    def _calculate_current_reward_points(self, task: Task, now: datetime) -> int | None:
+        """Calculate current reward points if task were completed now."""
+        # Only user-assigned tasks with evo points
+        if task.assigned_to_user_id is None:
+            return None
+        
+        effective_points = self._get_effective_evo_points(task)
+        if effective_points <= 0:
+            return 0
+        
+        # If no due datetime or no reduction, return full points
+        if not task.due_datetime or task.evo_reduction_type == EvoReductionType.NONE:
+            return effective_points
+        
+        due_dt = task.due_datetime
+        if due_dt.tzinfo is None:
+            due_dt = due_dt.replace(tzinfo=IST)
+        
+        # If not yet due, return full points
+        if now <= due_dt:
+            return effective_points
+        
+        # Apply reduction based on type
+        if task.evo_reduction_type == EvoReductionType.GRADUAL:
+            if not task.evo_extension_end:
+                return 0
+            ext_end = task.evo_extension_end
+            if ext_end.tzinfo is None:
+                ext_end = ext_end.replace(tzinfo=IST)
+            if now >= ext_end:
+                return 0
+            total_decay = (ext_end - due_dt).total_seconds()
+            elapsed = (now - due_dt).total_seconds()
+            if total_decay <= 0:
+                return 0
+            remaining_ratio = 1 - (elapsed / total_decay)
+            return max(0, int(effective_points * remaining_ratio))
+        
+        elif task.evo_reduction_type == EvoReductionType.FIXED:
+            if not task.evo_extension_end:
+                return task.evo_fixed_reduction_points or 0
+            ext_end = task.evo_extension_end
+            if ext_end.tzinfo is None:
+                ext_end = ext_end.replace(tzinfo=IST)
+            if now >= ext_end:
+                return 0
+            return task.evo_fixed_reduction_points or 0
+        
+        return effective_points
 
     def get_project_staff(self, project_id: int) -> list[dict]:
         """Get list of staff members in the project for admin selection."""

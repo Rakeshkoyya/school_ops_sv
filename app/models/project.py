@@ -2,7 +2,7 @@
 
 import enum
 
-from sqlalchemy import Enum, String, Text
+from sqlalchemy import BigInteger, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -29,6 +29,21 @@ class Project(Base, IDMixin, TimestampMixin):
     status: Mapped[ProjectStatus] = mapped_column(
         Enum(ProjectStatus),
         default=ProjectStatus.ACTIVE,
+        nullable=False,
+    )
+    
+    # Default task view style for this project (can be overridden by user preference)
+    default_task_view_style_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("task_view_styles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    # Evo Points - Default for tasks in this project
+    default_evo_points: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
         nullable=False,
     )
 
