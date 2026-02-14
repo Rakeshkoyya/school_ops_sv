@@ -22,6 +22,7 @@ from app.schemas.auth import (
     TokenResponse,
     UserBulkUploadResult,
     UserCreate,
+    UserProfileUpdate,
     UserResponse,
     UserWithProjectRoles,
 )
@@ -185,6 +186,37 @@ def change_password(
         request.new_password,
     )
     return MessageResponse(message="Password changed successfully")
+
+
+@router.patch("/me", response_model=UserResponse)
+def update_own_profile(
+    request: UserProfileUpdate,
+    current_user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+    http_request: Request,
+):
+    """
+    Update current user's own profile (name, phone only).
+    """
+    service = AuthService(db)
+    updated_user = service.update_own_profile(
+        current_user.id,
+        name=request.name,
+        phone=request.phone,
+    )
+    
+    # Audit log
+    audit = AuditService(db)
+    audit.log(
+        action=AuditAction.USER_UPDATED,
+        resource_type="user",
+        resource_id=str(current_user.id),
+        user_id=current_user.id,
+        description=f"User {current_user.username} updated their profile",
+        ip_address=http_request.client.host if http_request.client else None,
+    )
+    
+    return updated_user
 
 
 # Super Admin User Management Endpoints

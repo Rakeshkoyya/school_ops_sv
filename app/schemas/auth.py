@@ -21,6 +21,7 @@ class TokenResponse(BaseSchema):
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int
+    is_first_login: bool = False
 
 
 class RefreshTokenRequest(BaseSchema):
@@ -55,6 +56,13 @@ class UserResponse(BaseSchema):
 
 class UserUpdate(BaseSchema):
     """User update schema."""
+
+    name: str | None = Field(None, min_length=2, max_length=255)
+    phone: str | None = None
+
+
+class UserProfileUpdate(BaseSchema):
+    """Schema for users updating their own profile."""
 
     name: str | None = Field(None, min_length=2, max_length=255)
     phone: str | None = None

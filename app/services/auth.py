@@ -64,6 +64,9 @@ class AuthService:
         if not user.is_active:
             raise AuthenticationError("User account is deactivated")
 
+        # Detect first login before updating last_login_at
+        is_first_login = user.last_login_at is None
+
         # Update last login
         user.last_login_at = datetime.now(timezone.utc)
         self.db.flush()
@@ -79,6 +82,7 @@ class AuthService:
             refresh_token=refresh_token,
             token_type="bearer",
             expires_in=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            is_first_login=is_first_login,
         )
 
     def refresh_tokens(self, refresh_token: str) -> TokenResponse:
@@ -166,6 +170,25 @@ class AuthService:
 
         user.password_hash = hash_password(new_password)
         self.db.flush()
+
+    def update_own_profile(
+        self,
+        user_id: UUID,
+        name: str | None = None,
+        phone: str | None = None,
+    ) -> UserResponse:
+        """Update current user's own profile (name, phone only)."""
+        user = self.get_user_by_id(user_id)
+
+        if name is not None:
+            user.name = name
+        if phone is not None:
+            user.phone = phone
+
+        self.db.flush()
+        self.db.refresh(user)
+
+        return UserResponse.model_validate(user)
 
     def list_all_users(self) -> list[UserWithProjectRoles]:
         """List all users with their project-role mappings (for super admin)."""
