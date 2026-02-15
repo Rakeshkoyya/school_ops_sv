@@ -1,7 +1,6 @@
 """RBAC endpoints for roles and permissions."""
 
 from typing import Annotated
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
@@ -22,6 +21,7 @@ from app.schemas.rbac import (
     RoleWithPermissionsAndProject,
     UserRoleAssign,
     UserRoleResponse,
+    UserRolesUpdate,
     UserWithRoles,
 )
 from app.services.audit import AuditService
@@ -125,13 +125,13 @@ def list_all_roles(
     return roles
 
 
-@router.get("", response_model=list[RoleResponse])
+@router.get("", response_model=list[RoleWithPermissions])
 def list_roles(
     context: ProjectContext,
     db: Annotated[Session, Depends(get_db)],
 ):
     """
-    List all roles for the project.
+    List all roles for the project with their permissions.
     """
     service = RBACService(db)
     return service.list_roles(context.project_id)
@@ -139,7 +139,7 @@ def list_roles(
 
 @router.get("/{role_id}", response_model=RoleWithPermissions)
 def get_role(
-    role_id: UUID,
+    role_id: int,
     context: ProjectContext,
     db: Annotated[Session, Depends(get_db)],
 ):
@@ -152,7 +152,7 @@ def get_role(
 
 @router.patch("/{role_id}", response_model=RoleResponse)
 def update_role(
-    role_id: UUID,
+    role_id: int,
     request: RoleUpdate,
     context: Annotated[ProjectContext, Depends(require_role_admin())],
     db: Annotated[Session, Depends(get_db)],
@@ -220,7 +220,7 @@ def update_role_admin(
 
 @router.delete("/{role_id}", response_model=MessageResponse)
 def delete_role(
-    role_id: UUID,
+    role_id: int,
     context: Annotated[ProjectContext, Depends(require_role_admin())],
     db: Annotated[Session, Depends(get_db)],
     http_request: Request,
@@ -282,7 +282,7 @@ def delete_role_admin(
 
 @router.put("/{role_id}/permissions", response_model=RoleWithPermissions)
 def assign_permissions_to_role(
-    role_id: UUID,
+    role_id: int,
     request: RolePermissionAssign,
     context: Annotated[ProjectContext, Depends(require_role_admin())],
     db: Annotated[Session, Depends(get_db)],
@@ -400,8 +400,8 @@ def assign_user_to_role(
 
 @router.delete("/users/{user_id}/roles/{role_id}", response_model=MessageResponse)
 def revoke_user_role(
-    user_id: UUID,
-    role_id: UUID,
+    user_id: int,
+    role_id: int,
     context: Annotated[ProjectContext, Depends(require_role_admin())],
     db: Annotated[Session, Depends(get_db)],
     http_request: Request,
@@ -429,3 +429,36 @@ def revoke_user_role(
     )
 
     return MessageResponse(message="User role revoked successfully")
+
+
+@router.put("/users/{user_id}/roles", response_model=list[RoleResponse])
+def update_user_roles(
+    user_id: int,
+    request: UserRolesUpdate,
+    context: Annotated[ProjectContext, Depends(require_role_admin())],
+    db: Annotated[Session, Depends(get_db)],
+    http_request: Request,
+):
+    """
+    Replace all roles for a user in the project.
+    Requires role admin access.
+    """
+    service = RBACService(db)
+    roles = service.update_user_roles(context.project_id, user_id, request.role_ids)
+
+    # Audit log
+    audit = AuditService(db)
+    audit.log(
+        action=AuditAction.ROLE_ASSIGNED,
+        resource_type="user_roles",
+        project_id=context.project_id,
+        user_id=context.user_id,
+        description=f"User roles updated",
+        metadata={
+            "target_user_id": str(user_id),
+            "role_ids": [str(r.id) for r in roles],
+        },
+        ip_address=http_request.client.host if http_request.client else None,
+    )
+
+    return roles

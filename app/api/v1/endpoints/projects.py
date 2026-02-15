@@ -3,7 +3,7 @@
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -64,6 +64,23 @@ def list_user_projects(
     """
     service = ProjectService(db)
     return service.list_user_projects(current_user.id)
+
+
+@router.get("/all", response_model=list[ProjectResponse])
+def list_all_projects(
+    current_user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    """
+    List all projects in the system (super admin only).
+    """
+    if not current_user.is_super_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only super admins can access all projects"
+        )
+    service = ProjectService(db)
+    return service.list_all_projects()
 
 
 @router.get("/current", response_model=ProjectResponse)

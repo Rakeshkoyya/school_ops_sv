@@ -55,6 +55,12 @@ class Project(Base, IDMixin, TimestampMixin):
         lazy="selectin",
         passive_deletes=True,
     )
+    menu_allocations: Mapped[list["ProjectMenuScreen"]] = relationship(
+        "ProjectMenuScreen",
+        back_populates="project",
+        lazy="selectin",
+        passive_deletes=True,
+    )
 
     def __repr__(self) -> str:
         return f"<Project(id={self.id}, name={self.name})>"

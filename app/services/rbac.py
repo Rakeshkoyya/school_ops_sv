@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import NotFoundError, PermissionDeniedError, ValidationError
+from app.models.menu_screen import MenuScreenPermission, ProjectMenuScreen
 from app.models.rbac import Permission, Role, RolePermission, UserRoleProject
 from app.models.user import User
 from app.schemas.rbac import (
@@ -27,6 +28,63 @@ class RBACService:
 
     def __init__(self, db: Session):
         self.db = db
+
+    def _get_available_permission_ids_for_project(self, project_id: int) -> set[int]:
+        """Get permission IDs available for a project based on allocated menus."""
+        # Get allocated menu IDs
+        allocated_result = self.db.execute(
+            select(ProjectMenuScreen.menu_screen_id)
+            .where(ProjectMenuScreen.project_id == project_id)
+        )
+        allocated_menu_ids = [row[0] for row in allocated_result]
+        
+        if not allocated_menu_ids:
+            return set()
+
+        # Get permission IDs from those menus
+        perm_result = self.db.execute(
+            select(MenuScreenPermission.permission_id)
+            .where(MenuScreenPermission.menu_screen_id.in_(allocated_menu_ids))
+        )
+        return set(row[0] for row in perm_result)
+
+    def _validate_permissions_for_project(
+        self,
+        project_id: int,
+        permission_ids: list[int],
+        skip_validation: bool = False,
+    ) -> list[int]:
+        """
+        Validate that permissions are available for the project.
+        
+        Returns filtered list of valid permission IDs.
+        If skip_validation is True, returns all permission IDs (for super admin override).
+        """
+        if skip_validation:
+            return permission_ids
+        
+        available_ids = self._get_available_permission_ids_for_project(project_id)
+        
+        valid_ids = []
+        invalid_ids = []
+        for perm_id in permission_ids:
+            if perm_id in available_ids:
+                valid_ids.append(perm_id)
+            else:
+                invalid_ids.append(perm_id)
+        
+        if invalid_ids:
+            # Get permission keys for error message
+            perm_result = self.db.execute(
+                select(Permission.permission_key)
+                .where(Permission.id.in_(invalid_ids))
+            )
+            invalid_keys = [row[0] for row in perm_result]
+            raise ValidationError(
+                f"Permissions not available for this project (not in allocated menus): {', '.join(invalid_keys)}"
+            )
+        
+        return valid_ids
 
     # Permission methods
     def list_permissions(self) -> list[PermissionResponse]:
@@ -109,6 +167,12 @@ class RBACService:
                 if perm and perm.id not in permission_ids_to_assign:
                     permission_ids_to_assign.append(perm.id)
 
+        # Validate permissions are available for this project's allocated menus
+        if permission_ids_to_assign:
+            permission_ids_to_assign = self._validate_permissions_for_project(
+                project_id, permission_ids_to_assign
+            )
+
         # Assign permissions
         permissions = []
         for permission_id in permission_ids_to_assign:
@@ -142,15 +206,34 @@ class RBACService:
             raise NotFoundError("Role", str(role_id))
         return role
 
-    def list_roles(self, project_id: int) -> list[RoleResponse]:
-        """List all roles for a project."""
+    def list_roles(self, project_id: int) -> list[RoleWithPermissions]:
+        """List all roles for a project with their permissions."""
         result = self.db.execute(
             select(Role)
             .where(Role.project_id == project_id)
             .order_by(Role.name)
         )
         roles = result.scalars().all()
-        return [RoleResponse.model_validate(r) for r in roles]
+        
+        roles_with_permissions = []
+        for role in roles:
+            # Get permissions for this role
+            perm_result = self.db.execute(
+                select(Permission)
+                .join(RolePermission, Permission.id == RolePermission.permission_id)
+                .where(
+                    RolePermission.role_id == role.id,
+                    RolePermission.project_id == project_id,
+                )
+            )
+            permissions = perm_result.scalars().all()
+            
+            roles_with_permissions.append(RoleWithPermissions(
+                **RoleResponse.model_validate(role).model_dump(),
+                permissions=[p.permission_key for p in permissions],
+            ))
+        
+        return roles_with_permissions
 
     def list_all_roles(self) -> list[RoleWithPermissionsAndProject]:
         """List all roles across all projects (for super admin)."""
@@ -174,7 +257,7 @@ class RBACService:
             
             roles_with_permissions.append(RoleWithPermissionsAndProject(
                 **RoleResponse.model_validate(role).model_dump(),
-                permissions=[PermissionResponse.model_validate(p) for p in permissions],
+                permissions=[p.permission_key for p in permissions],
                 project_name=role.project.name if role.project else None,
             ))
         
@@ -201,7 +284,7 @@ class RBACService:
 
         return RoleWithPermissions(
             **RoleResponse.model_validate(role).model_dump(),
-            permissions=[PermissionResponse.model_validate(p) for p in permissions],
+            permissions=[p.permission_key for p in permissions],
         )
 
     def update_role(
@@ -235,6 +318,22 @@ class RBACService:
         
         # Update permissions if provided
         if permissions_to_update is not None:
+            # Resolve permission keys to IDs
+            permission_ids = []
+            for perm_key in permissions_to_update:
+                perm_result = self.db.execute(
+                    select(Permission).where(Permission.permission_key == perm_key)
+                )
+                perm = perm_result.scalar_one_or_none()
+                if perm:
+                    permission_ids.append(perm.id)
+            
+            # Validate permissions are available for this project's allocated menus
+            if permission_ids:
+                permission_ids = self._validate_permissions_for_project(
+                    project_id, permission_ids
+                )
+            
             # Remove existing permissions
             self.db.execute(
                 delete(RolePermission).where(
@@ -244,18 +343,13 @@ class RBACService:
             )
             
             # Add new permissions
-            for perm_key in permissions_to_update:
-                perm_result = self.db.execute(
-                    select(Permission).where(Permission.permission_key == perm_key)
+            for perm_id in permission_ids:
+                role_permission = RolePermission(
+                    project_id=project_id,
+                    role_id=role_id,
+                    permission_id=perm_id,
                 )
-                perm = perm_result.scalar_one_or_none()
-                if perm:
-                    role_permission = RolePermission(
-                        project_id=project_id,
-                        role_id=role_id,
-                        permission_id=perm.id,
-                    )
-                    self.db.add(role_permission)
+                self.db.add(role_permission)
 
         self.db.flush()
         self.db.refresh(role)
@@ -289,9 +383,24 @@ class RBACService:
         role_id: int,
         project_id: int,
         permission_ids: list[int],
+        skip_validation: bool = False,
     ) -> RoleWithPermissions:
-        """Assign permissions to a role (replaces existing)."""
+        """
+        Assign permissions to a role (replaces existing).
+        
+        Args:
+            role_id: Role ID to assign permissions to
+            project_id: Project ID
+            permission_ids: List of permission IDs to assign
+            skip_validation: If True, skip menu allocation validation (for super admin)
+        """
         role = self.get_role(role_id, project_id)
+
+        # Validate permissions are available for this project's allocated menus
+        if permission_ids and not skip_validation:
+            permission_ids = self._validate_permissions_for_project(
+                project_id, permission_ids
+            )
 
         # Remove existing permissions
         self.db.execute(
@@ -390,6 +499,48 @@ class RBACService:
 
         self.db.delete(assignment)
         self.db.flush()
+
+    def update_user_roles(
+        self,
+        project_id: int,
+        user_id: int,
+        role_ids: list[int],
+    ) -> list[RoleResponse]:
+        """Replace all roles for a user in a project."""
+        # Verify user exists
+        result = self.db.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+        if not user:
+            raise NotFoundError("User", str(user_id))
+
+        # Verify all roles exist and belong to this project
+        roles = []
+        for role_id in role_ids:
+            role = self.get_role(role_id, project_id)
+            roles.append(role)
+
+        # Delete existing role assignments for this user in this project
+        self.db.execute(
+            delete(UserRoleProject).where(
+                UserRoleProject.user_id == user_id,
+                UserRoleProject.project_id == project_id,
+            )
+        )
+
+        # Create new assignments
+        for role_id in role_ids:
+            assignment = UserRoleProject(
+                user_id=user_id,
+                role_id=role_id,
+                project_id=project_id,
+            )
+            self.db.add(assignment)
+
+        self.db.flush()
+
+        return [RoleResponse.model_validate(role) for role in roles]
 
     def list_project_users(
         self,

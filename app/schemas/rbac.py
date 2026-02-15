@@ -61,9 +61,9 @@ class RoleResponse(BaseSchema):
 
 
 class RoleWithPermissions(RoleResponse):
-    """Role response with permissions."""
+    """Role response with permissions as keys for frontend."""
 
-    permissions: list[PermissionResponse] = []
+    permissions: list[str] = []  # Permission keys like 'task:view'
 
 
 class RoleWithPermissionsAndProject(RoleWithPermissions):
@@ -85,6 +85,12 @@ class UserRoleAssign(BaseSchema):
 
     user_id: int
     role_id: int
+
+
+class UserRolesUpdate(BaseSchema):
+    """Update all roles for a user in a project."""
+
+    role_ids: list[int]
 
 
 class UserRoleResponse(BaseSchema):

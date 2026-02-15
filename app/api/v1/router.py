@@ -8,6 +8,7 @@ from app.api.v1.endpoints import (
     auth,
     evo_points,
     exams,
+    menu_screens,
     notifications,
     projects,
     roles,
@@ -38,6 +39,13 @@ api_router.include_router(
     roles.router,
     prefix="/roles",
     tags=["Roles & Permissions"],
+)
+
+# Menu Screens (super admin + project-scoped)
+api_router.include_router(
+    menu_screens.router,
+    prefix="/menu-screens",
+    tags=["Menu Screens"],
 )
 
 # Students (project-scoped)

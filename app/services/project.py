@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import NotFoundError, PermissionDeniedError, ValidationError
+from app.models.menu_screen import MenuScreen, ProjectMenuScreen
 from app.models.project import Project, ProjectStatus
 from app.models.rbac import Permission, Role, RolePermission, UserRoleProject
 from app.schemas.project import ProjectCreate, ProjectListItem, ProjectResponse, ProjectUpdate
@@ -61,6 +62,16 @@ class ProjectService:
         )
 
         self.db.add(project)
+        self.db.flush()
+
+        # Allocate all menus to the new project by default
+        menu_result = self.db.execute(select(MenuScreen.id))
+        for (menu_id,) in menu_result:
+            project_menu = ProjectMenuScreen(
+                project_id=project.id,
+                menu_screen_id=menu_id,
+            )
+            self.db.add(project_menu)
         self.db.flush()
 
         admin_role_id = None
@@ -158,6 +169,17 @@ class ProjectService:
         self.db.refresh(project)
 
         return ProjectResponse.model_validate(project)
+
+    def list_all_projects(self) -> list[ProjectResponse]:
+        """List all projects (for super admin use).
+        
+        Returns all projects in the system without deduplication issues.
+        """
+        result = self.db.execute(
+            select(Project).order_by(Project.name)
+        )
+        projects = result.scalars().all()
+        return [ProjectResponse.model_validate(p) for p in projects]
 
     def list_user_projects(self, user_id: int) -> list[ProjectListItem]:
         """List all project-role combinations for a user.

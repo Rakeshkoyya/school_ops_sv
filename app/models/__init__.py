@@ -4,6 +4,7 @@ from app.models.attendance import AttendanceRecord, AttendanceStatus
 from app.models.audit import AuditAction, AuditLog
 from app.models.evo_point import EvoPointTransaction, EvoTransactionType
 from app.models.exam import ExamRecord
+from app.models.menu_screen import MenuScreen, MenuScreenPermission, ProjectMenuScreen
 from app.models.notification import Notification
 from app.models.project import Project, ProjectStatus
 from app.models.rbac import Permission, Role, RolePermission, UserRoleProject
@@ -56,4 +57,8 @@ __all__ = [
     "UserTaskViewPreference",
     "TASK_COLUMNS",
     "get_default_column_config",
+    # Menu Screens
+    "MenuScreen",
+    "MenuScreenPermission",
+    "ProjectMenuScreen",
 ]
