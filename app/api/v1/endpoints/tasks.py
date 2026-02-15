@@ -214,6 +214,122 @@ def list_tasks(
     )
 
 
+# ==================== Recurring Task Template Endpoints ====================
+
+@router.get("/recurring-templates", response_model=list[RecurringTaskTemplateWithDetails])
+def list_recurring_templates(
+    context: Annotated[ProjectContext, Depends(require_permission("task:create_recurring"))],
+    db: Annotated[Session, Depends(get_db)],
+    include_inactive: bool = Query(False, description="Include inactive templates"),
+    my_templates_only: bool = Query(False, description="Filter to templates created by current user"),
+    assigned_to_user_id: int | None = Query(None, description="Filter by assigned user ID"),
+    is_active: bool | None = Query(None, description="Filter by active status (overrides include_inactive)"),
+):
+    """List all recurring task templates. Requires task:create_recurring permission."""
+    service = RecurringTaskService(db)
+    return service.list_templates(
+        project_id=context.project_id,
+        include_inactive=include_inactive,
+        created_by_user_id=context.user_id if my_templates_only else None,
+        assigned_to_user_id=assigned_to_user_id,
+        is_active=is_active,
+    )
+
+
+@router.post("/recurring-templates", response_model=RecurringTaskTemplateWithDetails)
+def create_recurring_template(
+    request: RecurringTaskTemplateCreate,
+    context: Annotated[ProjectContext, Depends(require_permission("task:create_recurring"))],
+    db: Annotated[Session, Depends(get_db)],
+    http_request: Request,
+):
+    """
+    Create a recurring task template.
+    Tasks will be auto-generated based on the recurrence schedule.
+    Requires task:create_recurring permission.
+    """
+    service = RecurringTaskService(db)
+    template = service.create_template(context.project_id, context.user_id, request)
+
+    # Audit log
+    audit = AuditService(db)
+    audit.log(
+        action=AuditAction.TASK_CREATED,
+        resource_type="recurring_task_template",
+        resource_id=str(template.id),
+        project_id=context.project_id,
+        user_id=context.user_id,
+        description=f"Recurring task template '{template.title}' created ({template.recurrence_type.value})",
+        ip_address=http_request.client.host if http_request.client else None,
+    )
+
+    return template
+
+
+@router.get("/recurring-templates/{template_id}", response_model=RecurringTaskTemplateWithDetails)
+def get_recurring_template(
+    template_id: int,
+    context: Annotated[ProjectContext, Depends(require_permission("task:create_recurring"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Get a recurring task template by ID."""
+    service = RecurringTaskService(db)
+    template = service.get_template(template_id, context.project_id)
+    return service._enrich_template(template)
+
+
+@router.patch("/recurring-templates/{template_id}", response_model=RecurringTaskTemplateWithDetails)
+def update_recurring_template(
+    template_id: int,
+    request: RecurringTaskTemplateUpdate,
+    context: Annotated[ProjectContext, Depends(require_permission("task:create_recurring"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Update a recurring task template."""
+    service = RecurringTaskService(db)
+    return service.update_template(template_id, context.project_id, request)
+
+
+@router.post("/recurring-templates/{template_id}/toggle", response_model=RecurringTaskTemplateWithDetails)
+def toggle_recurring_template(
+    template_id: int,
+    context: Annotated[ProjectContext, Depends(require_permission("task:create_recurring"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Toggle a recurring task template's active status."""
+    service = RecurringTaskService(db)
+    return service.toggle_template(template_id, context.project_id)
+
+
+@router.delete("/recurring-templates/{template_id}", response_model=MessageResponse)
+def delete_recurring_template(
+    template_id: int,
+    context: Annotated[ProjectContext, Depends(require_permission("task:create_recurring"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Delete a recurring task template."""
+    service = RecurringTaskService(db)
+    service.delete_template(template_id, context.project_id)
+    return MessageResponse(message="Recurring task template deleted successfully")
+
+
+@router.post("/recurring-templates/trigger-generation", response_model=MessageResponse)
+def trigger_task_generation(
+    context: Annotated[ProjectContext, Depends(require_permission("task:create_recurring"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """
+    Manually trigger recurring task generation for today.
+    Useful for testing or catching up missed generations.
+    """
+    from app.core.scheduler import trigger_recurring_task_generation
+    
+    trigger_recurring_task_generation()
+    return MessageResponse(message="Recurring task generation triggered")
+
+
+# ==================== Individual Task Endpoints ====================
+
 @router.get("/{task_id}", response_model=TaskWithDetails)
 def get_task(
     task_id: int,
@@ -370,108 +486,3 @@ def delete_task(
     service = TaskService(db)
     service.delete_task(task_id, context.project_id, context.user_id, is_admin)
     return MessageResponse(message="Task deleted successfully")
-
-
-# ==================== Recurring Task Template Endpoints ====================
-
-@router.get("/recurring-templates", response_model=list[RecurringTaskTemplateWithDetails])
-def list_recurring_templates(
-    context: Annotated[ProjectContext, Depends(require_permission("task:create_recurring"))],
-    db: Annotated[Session, Depends(get_db)],
-    include_inactive: bool = Query(False, description="Include inactive templates"),
-):
-    """List all recurring task templates. Requires task:create_recurring permission."""
-    service = RecurringTaskService(db)
-    return service.list_templates(context.project_id, include_inactive)
-
-
-@router.post("/recurring-templates", response_model=RecurringTaskTemplateWithDetails)
-def create_recurring_template(
-    request: RecurringTaskTemplateCreate,
-    context: Annotated[ProjectContext, Depends(require_permission("task:create_recurring"))],
-    db: Annotated[Session, Depends(get_db)],
-    http_request: Request,
-):
-    """
-    Create a recurring task template.
-    Tasks will be auto-generated based on the recurrence schedule.
-    Requires task:create_recurring permission.
-    """
-    service = RecurringTaskService(db)
-    template = service.create_template(context.project_id, context.user_id, request)
-
-    # Audit log
-    audit = AuditService(db)
-    audit.log(
-        action=AuditAction.TASK_CREATED,
-        resource_type="recurring_task_template",
-        resource_id=str(template.id),
-        project_id=context.project_id,
-        user_id=context.user_id,
-        description=f"Recurring task template '{template.title}' created ({template.recurrence_type.value})",
-        ip_address=http_request.client.host if http_request.client else None,
-    )
-
-    return template
-
-
-@router.get("/recurring-templates/{template_id}", response_model=RecurringTaskTemplateWithDetails)
-def get_recurring_template(
-    template_id: int,
-    context: Annotated[ProjectContext, Depends(require_permission("task:create_recurring"))],
-    db: Annotated[Session, Depends(get_db)],
-):
-    """Get a recurring task template by ID."""
-    service = RecurringTaskService(db)
-    template = service.get_template(template_id, context.project_id)
-    return service._enrich_template(template)
-
-
-@router.patch("/recurring-templates/{template_id}", response_model=RecurringTaskTemplateWithDetails)
-def update_recurring_template(
-    template_id: int,
-    request: RecurringTaskTemplateUpdate,
-    context: Annotated[ProjectContext, Depends(require_permission("task:create_recurring"))],
-    db: Annotated[Session, Depends(get_db)],
-):
-    """Update a recurring task template."""
-    service = RecurringTaskService(db)
-    return service.update_template(template_id, context.project_id, request)
-
-
-@router.post("/recurring-templates/{template_id}/toggle", response_model=RecurringTaskTemplateWithDetails)
-def toggle_recurring_template(
-    template_id: int,
-    context: Annotated[ProjectContext, Depends(require_permission("task:create_recurring"))],
-    db: Annotated[Session, Depends(get_db)],
-):
-    """Toggle a recurring task template's active status."""
-    service = RecurringTaskService(db)
-    return service.toggle_template(template_id, context.project_id)
-
-
-@router.delete("/recurring-templates/{template_id}", response_model=MessageResponse)
-def delete_recurring_template(
-    template_id: int,
-    context: Annotated[ProjectContext, Depends(require_permission("task:create_recurring"))],
-    db: Annotated[Session, Depends(get_db)],
-):
-    """Delete a recurring task template."""
-    service = RecurringTaskService(db)
-    service.delete_template(template_id, context.project_id)
-    return MessageResponse(message="Recurring task template deleted successfully")
-
-
-@router.post("/recurring-templates/trigger-generation", response_model=MessageResponse)
-def trigger_task_generation(
-    context: Annotated[ProjectContext, Depends(require_permission("task:create_recurring"))],
-    db: Annotated[Session, Depends(get_db)],
-):
-    """
-    Manually trigger recurring task generation for today.
-    Useful for testing or catching up missed generations.
-    """
-    from app.core.scheduler import trigger_recurring_task_generation
-    
-    trigger_recurring_task_generation()
-    return MessageResponse(message="Recurring task generation triggered")

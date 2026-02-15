@@ -4,7 +4,7 @@ from datetime import date, datetime, time
 
 from pydantic import Field, field_validator
 
-from app.models.task import RecurrenceType
+from app.models.task import EvoReductionType, RecurrenceType
 from app.schemas.common import BaseSchema
 
 
@@ -31,6 +31,12 @@ class RecurringTaskTemplateCreate(BaseSchema):
     
     # Assignment
     assigned_to_user_id: int | None = None
+    
+    # Evo Points settings (inherited by generated tasks)
+    evo_points: int | None = None
+    evo_reduction_type: EvoReductionType = EvoReductionType.NONE
+    evo_extension_time: time | None = None  # Combined with task date for extension end
+    evo_fixed_reduction_points: int | None = None
     
     # Control whether to create a task for today as well
     create_task_today: bool = False
@@ -67,6 +73,12 @@ class RecurringTaskTemplateUpdate(BaseSchema):
     # Assignment
     assigned_to_user_id: int | None = None
     
+    # Evo Points settings
+    evo_points: int | None = None
+    evo_reduction_type: EvoReductionType | None = None
+    evo_extension_time: time | None = None
+    evo_fixed_reduction_points: int | None = None
+    
     # Control
     is_active: bool | None = None
 
@@ -77,17 +89,21 @@ class RecurringTaskTemplateResponse(BaseSchema):
     id: int
     project_id: int
     title: str
-    description: str | None
-    category_id: int | None
+    description: str | None = None
+    category_id: int | None = None
     recurrence_type: RecurrenceType
-    days_of_week: str | None
-    scheduled_date: date | None
-    created_on_time: time | None
-    start_time: time | None
-    due_time: time | None
-    assigned_to_user_id: int | None
+    days_of_week: str | None = None
+    scheduled_date: date | None = None
+    created_on_time: time | None = None
+    start_time: time | None = None
+    due_time: time | None = None
+    assigned_to_user_id: int | None = None
+    evo_points: int | None = None
+    evo_reduction_type: EvoReductionType | None = None
+    evo_extension_time: time | None = None
+    evo_fixed_reduction_points: int | None = None
     is_active: bool
-    last_generated_date: date | None
+    last_generated_date: date | None = None
     created_by_id: int
     created_at: datetime
     updated_at: datetime

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.models.task import (
+    EvoReductionType,
     RecurrenceType,
     RecurringTaskTemplate,
     Task,
@@ -68,6 +69,11 @@ class RecurringTaskService:
             assigned_to_user_id=request.assigned_to_user_id or user_id,
             is_active=True,
             created_by_id=user_id,
+            # Evo Points settings
+            evo_points=request.evo_points,
+            evo_reduction_type=request.evo_reduction_type,
+            evo_extension_time=request.evo_extension_time,
+            evo_fixed_reduction_points=request.evo_fixed_reduction_points,
         )
         self.db.add(template)
         self.db.flush()
@@ -125,8 +131,11 @@ class RecurringTaskService:
         self,
         project_id: int,
         include_inactive: bool = False,
+        created_by_user_id: int | None = None,
+        assigned_to_user_id: int | None = None,
+        is_active: bool | None = None,
     ) -> list[RecurringTaskTemplateWithDetails]:
-        """List all recurring task templates for a project."""
+        """List all recurring task templates for a project with optional filters."""
         query = (
             select(RecurringTaskTemplate)
             .options(
@@ -137,8 +146,19 @@ class RecurringTaskService:
             .where(RecurringTaskTemplate.project_id == project_id)
         )
         
-        if not include_inactive:
+        # Filter by active status - is_active param takes precedence over include_inactive
+        if is_active is not None:
+            query = query.where(RecurringTaskTemplate.is_active == is_active)
+        elif not include_inactive:
             query = query.where(RecurringTaskTemplate.is_active == True)
+        
+        # Filter by creator
+        if created_by_user_id is not None:
+            query = query.where(RecurringTaskTemplate.created_by_id == created_by_user_id)
+        
+        # Filter by assigned user
+        if assigned_to_user_id is not None:
+            query = query.where(RecurringTaskTemplate.assigned_to_user_id == assigned_to_user_id)
         
         query = query.order_by(RecurringTaskTemplate.created_at.desc())
         
@@ -275,6 +295,13 @@ class RecurringTaskService:
             due_datetime = datetime.combine(
                 target_date, template.due_time
             ).replace(tzinfo=IST)
+        
+        # Evo extension end (combine time with date)
+        evo_extension_end = None
+        if template.evo_extension_time:
+            evo_extension_end = datetime.combine(
+                target_date, template.evo_extension_time
+            ).replace(tzinfo=IST)
 
         task = Task(
             project_id=template.project_id,
@@ -288,6 +315,11 @@ class RecurringTaskService:
             assigned_to_role_id=None,
             recurring_template_id=template.id,
             created_by_id=template.created_by_id,
+            # Evo Points settings from template
+            evo_points=template.evo_points,
+            evo_reduction_type=template.evo_reduction_type,
+            evo_extension_end=evo_extension_end,
+            evo_fixed_reduction_points=template.evo_fixed_reduction_points,
         )
         
         # Override created_at if specified

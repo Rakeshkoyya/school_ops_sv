@@ -256,6 +256,22 @@ class RecurringTaskTemplate(Base, IDMixin, TimestampMixin, ProjectScopedMixin):
         nullable=False,
     )
 
+    # Evo Points - Gamification fields (inherited by generated tasks)
+    evo_points: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )  # Points awarded on task completion
+    evo_reduction_type: Mapped[EvoReductionType] = mapped_column(
+        Enum(EvoReductionType),
+        default=EvoReductionType.NONE,
+        nullable=False,
+    )  # How points reduce after due time
+    evo_extension_time: Mapped[time | None] = mapped_column(
+        Time, nullable=True
+    )  # GRADUAL: when points hit zero; FIXED: grace period end (combined with date)
+    evo_fixed_reduction_points: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )  # FIXED: the amount to deduct after due time
+
     # Relationships
     category: Mapped["TaskCategory | None"] = relationship(
         "TaskCategory",
