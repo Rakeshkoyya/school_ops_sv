@@ -6,6 +6,7 @@ from app.api.v1.endpoints import (
     attendance,
     audit,
     auth,
+    dashboard,
     evo_points,
     exams,
     menu_screens,
@@ -25,6 +26,13 @@ api_router.include_router(
     auth.router,
     prefix="/auth",
     tags=["Authentication"],
+)
+
+# Dashboard (project-scoped, dynamic widgets)
+api_router.include_router(
+    dashboard.router,
+    prefix="/dashboard",
+    tags=["Dashboard"],
 )
 
 # Projects (partial project context - user can list their projects)
