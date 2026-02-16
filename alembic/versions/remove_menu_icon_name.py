@@ -20,13 +20,17 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Remove icon_name column from menu_screens."""
-    op.drop_column('menu_screens', 'icon_name')
+    """Remove icon_name column from menu_screens.
+    
+    Note: This migration is now a no-op because the add_menu_screens_feature
+    migration was updated to not include the icon_name column in the first place.
+    """
+    pass
 
 
 def downgrade() -> None:
-    """Add icon_name column back to menu_screens."""
-    op.add_column(
-        'menu_screens',
-        sa.Column('icon_name', sa.String(length=50), nullable=False, server_default='LayoutDashboard')
-    )
+    """Add icon_name column back to menu_screens.
+    
+    Note: No-op since upgrade doesn't do anything.
+    """
+    pass
