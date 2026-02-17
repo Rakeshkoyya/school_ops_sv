@@ -80,8 +80,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 
 # Production defaults (can override via docker run -e or docker-compose)
 ENV PORT=8000
-ENV WORKERS=4
-ENV RUN_MIGRATIONS=true
+ENV WORKERS=2
+ENV RUN_MIGRATIONS=false
 
 # Switch to non-root user
 USER appuser
