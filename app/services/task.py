@@ -607,11 +607,12 @@ class TaskService:
             return None
         
         # Look up the transaction for this task
+        # Use .value to get the lowercase string matching the DB enum
         transaction = self.db.execute(
             select(EvoPointTransaction)
             .where(
                 EvoPointTransaction.task_id == task.id,
-                EvoPointTransaction.transaction_type == EvoTransactionType.TASK_REWARD,
+                EvoPointTransaction.transaction_type == EvoTransactionType.TASK_REWARD.value,
             )
         ).scalar_one_or_none()
         

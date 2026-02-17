@@ -3,8 +3,8 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import ENUM as PgEnum, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -42,7 +42,11 @@ class EvoPointTransaction(Base, IDMixin, TimestampMixin):
 
     # Transaction details
     transaction_type: Mapped[EvoTransactionType] = mapped_column(
-        Enum(EvoTransactionType),
+        PgEnum(
+            'task_reward', 'admin_credit', 'admin_debit',
+            name='evotransactiontype',
+            create_type=False,
+        ),
         nullable=False,
         index=True,
     )

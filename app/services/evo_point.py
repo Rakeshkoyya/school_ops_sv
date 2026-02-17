@@ -238,7 +238,7 @@ class EvoPointService:
             transaction = EvoPointTransaction(
                 user_id=user_id,
                 project_id=project_id,
-                transaction_type=EvoTransactionType.TASK_REWARD,
+                transaction_type=EvoTransactionType.TASK_REWARD.value,
                 amount=actual_points,
                 balance_after=new_balance,
                 reason=f"Completed task: {task.title}",
@@ -297,7 +297,7 @@ class EvoPointService:
         transaction = EvoPointTransaction(
             user_id=user_id,
             project_id=project_id,
-            transaction_type=EvoTransactionType.ADMIN_CREDIT,
+            transaction_type=EvoTransactionType.ADMIN_CREDIT.value,
             amount=amount,
             balance_after=new_balance,
             reason=reason,
@@ -342,7 +342,7 @@ class EvoPointService:
         transaction = EvoPointTransaction(
             user_id=user_id,
             project_id=project_id,
-            transaction_type=EvoTransactionType.ADMIN_DEBIT,
+            transaction_type=EvoTransactionType.ADMIN_DEBIT.value,
             amount=-amount,  # Store as negative for debit
             balance_after=new_balance,
             reason=reason,
