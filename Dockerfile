@@ -37,6 +37,9 @@ COPY . .
 # Now install the project (if it's a package) - this ensures all deps are ready
 RUN uv sync --frozen --no-dev
 
+# Make venv world-accessible (fixes Railway/other PaaS permission issues)
+RUN chmod -R a+rX /app/.venv && chmod -R a+x /app/.venv/bin
+
 # =============================================================================
 # Stage 2: Runtime - Minimal production image
 # =============================================================================
@@ -52,24 +55,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     libffi8 \
     curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && useradd --create-home --shell /bin/bash --uid 1000 appuser
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy UV for running commands (matches local workflow: uv run ...)
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Copy virtual environment from builder
+# Copy virtual environment from builder (with fixed permissions)
 COPY --from=builder /app/.venv /app/.venv
 
 # Copy application code
 COPY --from=builder /app /app
 
-# Copy entrypoint script
+# Copy entrypoint script and make executable
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# Change ownership to appuser
-RUN chown -R appuser:appuser /app
+# Make everything world-readable (Railway runs as arbitrary user)
+RUN chmod -R a+rX /app && chmod -R a+x /app/.venv/bin
 
 # Environment variables
 ENV VIRTUAL_ENV=/app/.venv
@@ -82,9 +84,6 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PORT=8000
 ENV WORKERS=2
 ENV RUN_MIGRATIONS=false
-
-# Switch to non-root user
-USER appuser
 
 # Expose port
 EXPOSE 8000
