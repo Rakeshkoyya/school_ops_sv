@@ -1,1 +1,1 @@
-web: /app/.venv/bin/gunicorn app.main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --access-logfile - --error-logfile - --timeout 120
+web: /app/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2
