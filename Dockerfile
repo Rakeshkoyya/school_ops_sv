@@ -57,18 +57,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy UV for running commands (matches local workflow: uv run ...)
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-
 # Copy virtual environment from builder (with fixed permissions)
 COPY --from=builder /app/.venv /app/.venv
 
 # Copy application code
 COPY --from=builder /app /app
-
-# Copy entrypoint script and make executable
-COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
 
 # Make everything world-readable (Railway runs as arbitrary user)
 RUN chmod -R a+rX /app && chmod -R a+x /app/.venv/bin
@@ -83,14 +76,10 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # Production defaults (can override via docker run -e or docker-compose)
 ENV PORT=8000
 ENV WORKERS=2
-ENV RUN_MIGRATIONS=false
 
-# Expose port
+# Expose port (Railway will set PORT dynamically)
 EXPOSE 8000
 
-# Health check using curl (simpler and more reliable)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl --fail http://localhost:${PORT}/api/v1/health || exit 1
-
-# Use entrypoint script for proper signal handling
-ENTRYPOINT ["/app/entrypoint.sh"]
+# Start gunicorn directly (Railway provides PORT env var)
+# Using shell form to expand $PORT at runtime
+CMD gunicorn app.main:app --workers ${WORKERS:-2} --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-8000} --access-logfile - --error-logfile - --timeout 120
