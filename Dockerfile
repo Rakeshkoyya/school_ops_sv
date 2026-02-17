@@ -45,5 +45,5 @@ ENV WORKERS=2
 # Expose port
 EXPOSE 8000
 
-# Start uvicorn
-CMD python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${WORKERS:-2}
+# Start uvicorn with shell for variable expansion
+CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${WORKERS:-2}"]
