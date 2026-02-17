@@ -80,6 +80,6 @@ ENV WORKERS=2
 # Expose port (Railway will set PORT dynamically)
 EXPOSE 8000
 
-# Start gunicorn directly (Railway provides PORT env var)
+# Start gunicorn directly using full path
 # Using shell form to expand $PORT at runtime
-CMD gunicorn app.main:app --workers ${WORKERS:-2} --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-8000} --access-logfile - --error-logfile - --timeout 120
+CMD /app/.venv/bin/gunicorn app.main:app --workers ${WORKERS:-2} --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-8000} --access-logfile - --error-logfile - --timeout 120
