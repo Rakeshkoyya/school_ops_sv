@@ -1,47 +1,79 @@
-# Docker ignore patterns for School Ops
+# =============================================================================
+# Docker ignore file for School Ops Backend
+# =============================================================================
+# Excludes files from Docker build context to:
+# 1. Speed up builds (smaller context)
+# 2. Prevent secrets from leaking into images
+# 3. Avoid overwriting dependencies installed in container
+# =============================================================================
 
 # Git
 .git
 .gitignore
+.gitattributes
 
-# Dependencies (will be installed in container)
-node_modules
+# Virtual environments (we create fresh one in Docker)
 .venv
+venv
+env
+
+# Python cache files
 __pycache__
 *.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Environment files (IMPORTANT: prevent secrets leaking)
+.env
+.env.*
+!.env.example
 
 # Build outputs
-.next
 dist
 build
+*.egg-info
 
-# Development files
-*.log
-.env
-.env.local
-.env.*.local
-
-# IDE
+# Development/IDE files
 .vscode
 .idea
 *.swp
 *.swo
+*~
 
 # OS files
 .DS_Store
 Thumbs.db
 
 # Test files
-coverage
 .pytest_cache
 .coverage
 htmlcov
+coverage
+.tox
+.nox
 
-# Documentation
+# Documentation (not needed in production)
 *.md
 !README.md
 docs
 
-# Misc
+# Linting/formatting cache
+.mypy_cache
+.ruff_cache
+.flake8
+
+# Local scripts not needed in production
+scripts/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
 *.bak
 *.tmp
+*.temp
+tmp/
+temp/
