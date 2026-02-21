@@ -1,12 +1,14 @@
 """APScheduler configuration for recurring tasks."""
 
 import logging
+import os
 from datetime import datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import SessionLocal
 from app.services.recurring_task import RecurringTaskService
 
@@ -69,6 +71,12 @@ def init_scheduler() -> AsyncIOScheduler:
 def start_scheduler():
     """Start the scheduler."""
     global scheduler
+    
+    # Check if scheduler is enabled (disable in multi-worker deployments)
+    if not settings.ENABLE_SCHEDULER:
+        logger.info("Scheduler disabled via ENABLE_SCHEDULER=False")
+        return
+    
     if scheduler is None:
         scheduler = init_scheduler()
     

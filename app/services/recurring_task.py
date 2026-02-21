@@ -2,7 +2,9 @@
 
 from datetime import date, datetime, time, timezone, timedelta
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.sql import cast
+from sqlalchemy import Date as SQLDate
 
 # IST timezone (UTC+5:30)
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -237,13 +239,14 @@ class RecurringTaskService:
 
         for template in templates:
             if self._should_generate_for_date(template, target_date):
-                self._generate_task_from_template(template, target_date)
-                template.last_generated_date = target_date
-                generated_count += 1
-                
-                # Deactivate "once" templates after generation
-                if template.recurrence_type == RecurrenceType.ONCE.value:
-                    template.is_active = False
+                task = self._generate_task_from_template(template, target_date)
+                if task:  # Only count if task was actually created (not duplicate)
+                    template.last_generated_date = target_date
+                    generated_count += 1
+                    
+                    # Deactivate "once" templates after generation
+                    if template.recurrence_type == RecurrenceType.ONCE.value:
+                        template.is_active = False
 
         self.db.commit()
         return generated_count
@@ -275,8 +278,22 @@ class RecurringTaskService:
         self,
         template: RecurringTaskTemplate,
         target_date: date,
-    ) -> Task:
-        """Create a task from a template for the given date."""
+    ) -> Task | None:
+        """
+        Create a task from a template for the given date.
+        Returns None if a task already exists for this template on the target date.
+        """
+        # Check if task already exists for this template on this date (prevents duplicates)
+        existing_task = self.db.execute(
+            select(Task).where(
+                Task.recurring_template_id == template.id,
+                cast(Task.created_at, SQLDate) == target_date,
+            )
+        ).scalar_one_or_none()
+        
+        if existing_task:
+            return None  # Task already exists, skip creation
+        
         # Combine date with time fields and add IST timezone
         created_at = None
         if template.created_on_time:

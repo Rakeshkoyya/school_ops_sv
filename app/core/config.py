@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     MAX_UPLOAD_SIZE_MB: int = 10
     ALLOWED_EXTENSIONS: list[str] = [".xlsx"]
 
+    # Scheduler Settings (set to False in multi-worker deployments, run scheduler separately)
+    ENABLE_SCHEDULER: bool = True
+
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def validate_database_url(cls, v: Any) -> Any:

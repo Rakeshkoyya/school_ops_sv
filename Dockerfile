@@ -30,7 +30,7 @@ RUN uv pip install --system --no-cache -r pyproject.toml
 # Copy application code
 COPY . .
 
-# Make everything world-readable (Railway runs as arbitrary user)
+# Make everything world-readable (container may run as non-root user)
 RUN chmod -R a+rX /app
 
 # Environment variables
