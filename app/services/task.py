@@ -158,6 +158,11 @@ class TaskService:
         self.db.add(task)
         self.db.flush()
         
+        # Default start_time to created_at
+        if not task.start_time:
+            task.start_time = task.created_at
+            self.db.flush()
+        
         # Reload task with relationships
         task = self.get_task(task.id, project_id)
         return self._enrich_task(task)
@@ -198,7 +203,10 @@ class TaskService:
         
         Includes:
         - All pending, in_progress, and overdue tasks
-        - Tasks completed TODAY (so users can see recent accomplishments)
+        - Done/cancelled tasks visible until max(due_datetime, end_time) date passes:
+          - Completed on time (end_time <= due_datetime): visible while due_datetime >= today
+          - Completed late (end_time > due_datetime): visible while end_time >= today
+          - No due date: visible while end_time >= today
         """
         conditions = [Task.assigned_to_user_id == user_id]
 
@@ -216,13 +224,31 @@ class TaskService:
         # Get today's start in IST
         today_start = datetime.now(IST).replace(hour=0, minute=0, second=0, microsecond=0)
 
-        # Status conditions: pending/in_progress/overdue OR completed today
+        # Status conditions: pending/in_progress/overdue OR done/cancelled with visibility rules
+        # Done/cancelled tasks: visible while max(due_datetime, end_time) >= today_start
+        # - If due_datetime exists and due_datetime >= end_time (on time): visible until due_datetime passes
+        # - If due_datetime exists and due_datetime < end_time (late): visible until end_time passes
+        # - If no due_datetime: visible until end_time passes
+        finished_visibility = and_(
+            Task.status.in_([TaskStatus.DONE, TaskStatus.CANCELLED]),
+            Task.end_time.isnot(None),
+            or_(
+                # Has due_datetime: visible while greatest(due_datetime, end_time) >= today
+                and_(
+                    Task.due_datetime.isnot(None),
+                    func.greatest(Task.due_datetime, Task.end_time) >= today_start,
+                ),
+                # No due_datetime: visible while end_time >= today
+                and_(
+                    Task.due_datetime.is_(None),
+                    Task.end_time >= today_start,
+                ),
+            ),
+        )
+
         status_conditions = or_(
             Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.OVERDUE]),
-            and_(
-                Task.status == TaskStatus.DONE,
-                Task.end_time >= today_start,  # Completed today
-            ),
+            finished_visibility,
         )
 
         query = (
@@ -340,9 +366,16 @@ class TaskService:
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[TaskWithDetails], int]:
-        """List tasks with optional filtering."""
+        """List tasks with optional filtering.
+        
+        When no date range filter is active, applies default visibility rules
+        (same as get_my_tasks) so old done/cancelled tasks don't clutter the list.
+        When due_before/due_after are provided, returns all tasks in that range
+        regardless of status.
+        """
         query = select(Task).where(Task.project_id == project_id)
 
+        has_date_filter = False
         if filters:
             if filters.status:
                 query = query.where(Task.status == filters.status)
@@ -354,8 +387,10 @@ class TaskService:
                 query = query.where(Task.assigned_to_role_id == filters.assigned_to_role_id)
             if filters.due_before:
                 query = query.where(Task.due_datetime <= filters.due_before)
+                has_date_filter = True
             if filters.due_after:
                 query = query.where(Task.due_datetime >= filters.due_after)
+                has_date_filter = True
             if filters.is_overdue:
                 now_ist = datetime.now(IST)
                 query = query.where(
@@ -364,6 +399,29 @@ class TaskService:
                         Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS]),
                     )
                 )
+
+        # Apply default visibility rules when no date range filter is active
+        if not has_date_filter:
+            today_start = datetime.now(IST).replace(hour=0, minute=0, second=0, microsecond=0)
+            finished_visibility = and_(
+                Task.status.in_([TaskStatus.DONE, TaskStatus.CANCELLED]),
+                Task.end_time.isnot(None),
+                or_(
+                    and_(
+                        Task.due_datetime.isnot(None),
+                        func.greatest(Task.due_datetime, Task.end_time) >= today_start,
+                    ),
+                    and_(
+                        Task.due_datetime.is_(None),
+                        Task.end_time >= today_start,
+                    ),
+                ),
+            )
+            status_conditions = or_(
+                Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.OVERDUE]),
+                finished_visibility,
+            )
+            query = query.where(status_conditions)
 
         # Count total
         count_result = self.db.execute(
@@ -467,6 +525,79 @@ class TaskService:
         self.db.refresh(task)
         return self._enrich_task(task)
 
+    def revert_task(
+        self,
+        task_id: int,
+        project_id: int,
+        user_id: int,
+        target_status: TaskStatus = TaskStatus.PENDING,
+    ) -> TaskWithDetails:
+        """Revert a completed task back to pending or in_progress.
+        
+        This will:
+        - Reset end_time to None
+        - If reverting to pending, also reset start_time
+        - Deduct any evo points that were earned from completing this task
+        """
+        task = self.get_task(task_id, project_id)
+
+        # Can only revert completed tasks
+        if task.status != TaskStatus.DONE:
+            raise ValidationError("Can only revert completed tasks")
+
+        # Verify user is assigned to this task
+        if task.assigned_to_user_id != user_id:
+            raise ForbiddenError("You can only revert tasks assigned to you")
+
+        # Valid target statuses
+        if target_status not in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS):
+            raise ValidationError("Can only revert to pending or in_progress status")
+
+        # Find and reverse any evo points transaction for this task
+        earned_transaction = self.db.execute(
+            select(EvoPointTransaction)
+            .where(
+                EvoPointTransaction.task_id == task.id,
+                EvoPointTransaction.transaction_type == EvoTransactionType.TASK_REWARD.value,
+            )
+        ).scalar_one_or_none()
+
+        if earned_transaction and earned_transaction.amount > 0:
+            # Deduct the points from user
+            from app.models.user import User
+            user = self.db.get(User, user_id)
+            if user:
+                new_balance = max(0, user.evo_points - earned_transaction.amount)
+                user.evo_points = new_balance
+                
+                # Create reversal transaction
+                reversal = EvoPointTransaction(
+                    user_id=user_id,
+                    project_id=project_id,
+                    transaction_type=EvoTransactionType.ADMIN_DEBIT.value,
+                    amount=-earned_transaction.amount,  # Negative amount for debit
+                    balance_after=new_balance,
+                    reason=f"Task reverted: {task.title}",
+                    task_id=task.id,
+                    metadata={
+                        "task_title": task.title,
+                        "original_reward_transaction_id": earned_transaction.id,
+                        "reverted_points": earned_transaction.amount,
+                    },
+                )
+                self.db.add(reversal)
+
+        # Reset task fields
+        task.end_time = None
+        task.status = target_status
+        
+        if target_status == TaskStatus.PENDING:
+            task.start_time = None
+
+        self.db.flush()
+        self.db.refresh(task)
+        return self._enrich_task(task)
+
     def update_task_status(
         self,
         task_id: int,
@@ -484,7 +615,7 @@ class TaskService:
         task.status = status
         if status == TaskStatus.IN_PROGRESS and not task.start_time:
             task.start_time = datetime.now(IST)  # Store with IST timezone
-        elif status == TaskStatus.DONE:
+        elif status in (TaskStatus.DONE, TaskStatus.CANCELLED):
             task.end_time = datetime.now(IST)  # Store with IST timezone
 
         self.db.flush()
@@ -547,7 +678,7 @@ class TaskService:
             return dt
         
         due_dt = make_aware(task.due_datetime)
-        start_dt = make_aware(task.start_time)
+        start_dt = make_aware(task.start_time) or make_aware(task.created_at)
         
         is_overdue = (
             due_dt is not None

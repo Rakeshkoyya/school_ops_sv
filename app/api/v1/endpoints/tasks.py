@@ -1,5 +1,6 @@
 """Task management endpoints with timer support."""
 
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -186,6 +187,8 @@ def list_tasks(
     assigned_to_user_id: int | None = None,
     assigned_to_role_id: int | None = None,
     is_overdue: bool | None = None,
+    due_before: datetime | None = None,
+    due_after: datetime | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
@@ -197,6 +200,8 @@ def list_tasks(
         assigned_to_user_id=assigned_to_user_id,
         assigned_to_role_id=assigned_to_role_id,
         is_overdue=is_overdue,
+        due_before=due_before,
+        due_after=due_after,
     )
     tasks, total = service.list_tasks(
         context.project_id,
@@ -466,6 +471,42 @@ def update_task_status(
             description=f"Task '{task.title}' completed",
             ip_address=http_request.client.host if http_request.client else None,
         )
+
+    return task
+
+
+@router.post("/{task_id}/revert", response_model=TaskWithDetails)
+def revert_task(
+    task_id: int,
+    context: ProjectContext,
+    db: Annotated[Session, Depends(get_db)],
+    http_request: Request,
+    target_status: TaskStatus = TaskStatus.PENDING,
+):
+    """
+    Revert a completed task back to pending or in_progress.
+    
+    This will:
+    - Reset end_time to None (and start_time if reverting to pending)
+    - Deduct any evo points that were earned from completing this task
+    """
+    service = TaskService(db)
+    task = service.revert_task(
+        task_id, context.project_id, context.user_id, target_status
+    )
+
+    # Audit log
+    audit = AuditService(db)
+    audit.log(
+        action=AuditAction.TASK_UPDATED,
+        resource_type="task",
+        resource_id=str(task_id),
+        project_id=context.project_id,
+        user_id=context.user_id,
+        description=f"Task '{task.title}' reverted to {target_status.value}",
+        metadata={"reverted_to": target_status.value},
+        ip_address=http_request.client.host if http_request.client else None,
+    )
 
     return task
 
