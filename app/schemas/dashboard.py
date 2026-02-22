@@ -1,6 +1,6 @@
 """Dashboard schemas for role-based widgets."""
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import Field
@@ -151,3 +151,114 @@ class DashboardResponse(BaseSchema):
     exams: ExamDashboardStats | None = None
     students: StudentDashboardStats | None = None
     evo_points: EvoDashboardStats | None = None
+
+
+# ==========================================
+# My Tasks Report (Section 1 — all users)
+# ==========================================
+
+class TaskListItem(BaseSchema):
+    """Lightweight task reference for collapsible lists."""
+
+    id: int
+    title: str
+    due_datetime: datetime | None = None
+    status: str
+
+
+class MyTasksReport(BaseSchema):
+    """My tasks report data for dashboard Section 1."""
+
+    total_active: int = Field(
+        default=0,
+        description="Total active tasks (pending + in_progress + done)",
+    )
+    total_completed: int = Field(
+        default=0,
+        description="Completed (done) tasks count",
+    )
+    today_total: int = Field(
+        default=0,
+        description="Tasks due today",
+    )
+    today_completed: int = Field(
+        default=0,
+        description="Today's tasks that are done",
+    )
+    pending_count: int = 0
+    in_progress_count: int = 0
+    completed_count: int = 0
+    overdue_count: int = 0
+    pending_tasks: list[TaskListItem] = Field(
+        default=[],
+        description="Pending and in-progress tasks for collapsible list",
+    )
+
+
+# ==========================================
+# Project Task Stats (Section 2 — all users)
+# ==========================================
+
+class ProjectTaskStatsResponse(BaseSchema):
+    """Project-level task statistics for dashboard Section 2."""
+
+    pending_count: int = 0
+    in_progress_count: int = 0
+    overdue_count: int = 0
+    completed_count: int = 0
+    active_tasks: int = Field(
+        default=0,
+        description="Count of pending + in_progress tasks",
+    )
+    total_tasks: int = 0
+    status_distribution: TaskStatusCount = Field(
+        default_factory=TaskStatusCount,
+    )
+    evo_leaderboard: list[EvoLeaderboardEntry] = []
+
+
+# ==========================================
+# User Level Stats (Section 3 — admin only)
+# ==========================================
+
+class UserDailyTaskRow(BaseSchema):
+    """Per-user task row for admin dashboard Section 3."""
+
+    user_id: int
+    user_name: str
+    today_total: int = 0
+    today_completed: int = 0
+    completion_percentage: float = Field(
+        default=0.0,
+        description="Percentage of today's tasks completed (0-100)",
+    )
+    pending_count: int = 0
+    in_progress_count: int = 0
+    completed_count: int = 0
+    overdue_count: int = 0
+    pending_tasks: list[TaskListItem] = Field(
+        default=[],
+        description="Pending tasks due today for collapsible list",
+    )
+
+
+class UserLevelStatsResponse(BaseSchema):
+    """User-level task statistics for admin dashboard Section 3."""
+
+    today_total: int = Field(
+        default=0,
+        description="Total tasks due today across all users",
+    )
+    today_completed: int = Field(
+        default=0,
+        description="Completed today's tasks across all users",
+    )
+    overall_total: int = Field(
+        default=0,
+        description="Total non-closed tasks across all users",
+    )
+    overall_completed: int = Field(
+        default=0,
+        description="Completed tasks across all users",
+    )
+    user_rows: list[UserDailyTaskRow] = []

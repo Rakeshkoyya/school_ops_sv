@@ -23,9 +23,14 @@ from app.schemas.dashboard import (
     EvoDashboardStats,
     EvoLeaderboardEntry,
     ExamDashboardStats,
+    MyTasksReport,
+    ProjectTaskStatsResponse,
     StudentDashboardStats,
     TaskDashboardStats,
+    TaskListItem,
     TaskStatusCount,
+    UserDailyTaskRow,
+    UserLevelStatsResponse,
 )
 
 # IST timezone (UTC+5:30)
@@ -463,4 +468,262 @@ class DashboardService:
             current_user_balance=current_balance,
             current_user_rank=current_user_rank,
             leaderboard=leaderboard,
+        )
+
+    # ==========================================================
+    # New dashboard sections
+    # ==========================================================
+
+    def get_my_tasks_report(
+        self,
+        project_id: int,
+        user_id: int,
+    ) -> MyTasksReport:
+        """Get current user's task report (Section 1)."""
+        now = datetime.now(IST)
+        today_date = now.date()
+
+        # Fetch tasks assigned to this user in this project
+        query = select(Task).where(
+            Task.project_id == project_id,
+            Task.assigned_to_user_id == user_id,
+        )
+        tasks = list(self.db.execute(query).scalars().all())
+
+        pending = 0
+        in_progress = 0
+        completed = 0
+        overdue = 0
+        today_total = 0
+        today_completed = 0
+        pending_task_items: list[TaskListItem] = []
+
+        for task in tasks:
+            # Skip cancelled
+            if task.status == TaskStatus.CANCELLED:
+                continue
+
+            if task.status == TaskStatus.PENDING:
+                pending += 1
+            elif task.status == TaskStatus.IN_PROGRESS:
+                in_progress += 1
+            elif task.status == TaskStatus.DONE:
+                completed += 1
+
+            # Check overdue (pending/in_progress past due)
+            is_overdue = False
+            if task.due_datetime and task.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS):
+                if task.due_datetime < now:
+                    overdue += 1
+                    is_overdue = True
+
+            # Due today
+            if task.due_datetime:
+                task_due_date = task.due_datetime.date()
+                if task_due_date == today_date:
+                    today_total += 1
+                    if task.status == TaskStatus.DONE:
+                        today_completed += 1
+
+            # Pending/in-progress tasks for the collapsible list
+            if task.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS):
+                pending_task_items.append(TaskListItem(
+                    id=task.id,
+                    title=task.title,
+                    due_datetime=task.due_datetime,
+                    status="overdue" if is_overdue else task.status.value,
+                ))
+
+        # Sort pending tasks by due_datetime ascending (None at end)
+        pending_task_items.sort(
+            key=lambda t: (t.due_datetime is None, t.due_datetime),
+        )
+
+        total_active = pending + in_progress + completed
+
+        return MyTasksReport(
+            total_active=total_active,
+            total_completed=completed,
+            today_total=today_total,
+            today_completed=today_completed,
+            pending_count=pending,
+            in_progress_count=in_progress,
+            completed_count=completed,
+            overdue_count=overdue,
+            pending_tasks=pending_task_items,
+        )
+
+    def get_project_task_stats(
+        self,
+        project_id: int,
+    ) -> ProjectTaskStatsResponse:
+        """Get project-level task statistics (Section 2)."""
+        now = datetime.now(IST)
+
+        query = select(Task).where(Task.project_id == project_id)
+        tasks = list(self.db.execute(query).scalars().all())
+
+        pending = 0
+        in_progress = 0
+        done = 0
+        overdue = 0
+        cancelled = 0
+
+        for task in tasks:
+            if task.status == TaskStatus.PENDING:
+                pending += 1
+            elif task.status == TaskStatus.IN_PROGRESS:
+                in_progress += 1
+            elif task.status == TaskStatus.DONE:
+                done += 1
+            elif task.status == TaskStatus.CANCELLED:
+                cancelled += 1
+
+            if task.due_datetime and task.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS):
+                if task.due_datetime < now:
+                    overdue += 1
+
+        active_tasks = pending + in_progress
+        total_tasks = pending + in_progress + done + cancelled
+
+        # Evo leaderboard (reuse logic)
+        evo_stats = self._get_evo_stats(project_id, user_id=0)
+
+        return ProjectTaskStatsResponse(
+            pending_count=pending,
+            in_progress_count=in_progress,
+            overdue_count=overdue,
+            completed_count=done,
+            active_tasks=active_tasks,
+            total_tasks=total_tasks,
+            status_distribution=TaskStatusCount(
+                pending=pending,
+                in_progress=in_progress,
+                done=done,
+                overdue=overdue,
+                cancelled=cancelled,
+            ),
+            evo_leaderboard=evo_stats.leaderboard,
+        )
+
+    def get_user_level_stats(
+        self,
+        project_id: int,
+    ) -> UserLevelStatsResponse:
+        """Get per-user task statistics for admin view (Section 3)."""
+        now = datetime.now(IST)
+        today_date = now.date()
+
+        # Get all users in this project
+        users_query = (
+            select(User)
+            .join(UserRoleProject, UserRoleProject.user_id == User.id)
+            .where(
+                UserRoleProject.project_id == project_id,
+                User.is_active == True,
+            )
+            .distinct()
+        )
+        project_users = list(self.db.execute(users_query).scalars().all())
+
+        # Get ALL tasks in this project in a single query
+        all_tasks = list(
+            self.db.execute(
+                select(Task).where(Task.project_id == project_id)
+            ).scalars().all()
+        )
+
+        # Group tasks by assigned user
+        tasks_by_user: dict[int, list[Task]] = {}
+        for task in all_tasks:
+            if task.assigned_to_user_id:
+                tasks_by_user.setdefault(task.assigned_to_user_id, []).append(task)
+
+        overall_total = 0
+        overall_completed = 0
+        aggregate_today_total = 0
+        aggregate_today_completed = 0
+        user_rows: list[UserDailyTaskRow] = []
+
+        for user in project_users:
+            user_tasks = tasks_by_user.get(user.id, [])
+
+            u_pending = 0
+            u_in_progress = 0
+            u_completed = 0
+            u_overdue = 0
+            u_today_total = 0
+            u_today_completed = 0
+            u_pending_items: list[TaskListItem] = []
+
+            for task in user_tasks:
+                if task.status == TaskStatus.CANCELLED:
+                    continue
+
+                if task.status == TaskStatus.PENDING:
+                    u_pending += 1
+                elif task.status == TaskStatus.IN_PROGRESS:
+                    u_in_progress += 1
+                elif task.status == TaskStatus.DONE:
+                    u_completed += 1
+
+                is_overdue = False
+                if task.due_datetime and task.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS):
+                    if task.due_datetime < now:
+                        u_overdue += 1
+                        is_overdue = True
+
+                if task.due_datetime:
+                    task_due_date = task.due_datetime.date()
+                    if task_due_date == today_date:
+                        u_today_total += 1
+                        if task.status == TaskStatus.DONE:
+                            u_today_completed += 1
+
+                # Pending/in-progress tasks due today for dropdown
+                if task.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS):
+                    if task.due_datetime and task.due_datetime.date() == today_date:
+                        u_pending_items.append(TaskListItem(
+                            id=task.id,
+                            title=task.title,
+                            due_datetime=task.due_datetime,
+                            status="overdue" if is_overdue else task.status.value,
+                        ))
+
+            u_pending_items.sort(
+                key=lambda t: (t.due_datetime is None, t.due_datetime),
+            )
+
+            u_active = u_pending + u_in_progress + u_completed
+            completion_pct = (
+                (u_today_completed / u_today_total * 100) if u_today_total > 0 else 0.0
+            )
+
+            overall_total += u_active
+            overall_completed += u_completed
+            aggregate_today_total += u_today_total
+            aggregate_today_completed += u_today_completed
+
+            user_rows.append(UserDailyTaskRow(
+                user_id=user.id,
+                user_name=user.name,
+                today_total=u_today_total,
+                today_completed=u_today_completed,
+                completion_percentage=round(completion_pct, 1),
+                pending_count=u_pending,
+                in_progress_count=u_in_progress,
+                completed_count=u_completed,
+                overdue_count=u_overdue,
+                pending_tasks=u_pending_items,
+            ))
+
+        # Sort by completion percentage descending
+        user_rows.sort(key=lambda r: r.completion_percentage, reverse=True)
+
+        return UserLevelStatsResponse(
+            today_total=aggregate_today_total,
+            today_completed=aggregate_today_completed,
+            overall_total=overall_total,
+            overall_completed=overall_completed,
+            user_rows=user_rows,
         )
