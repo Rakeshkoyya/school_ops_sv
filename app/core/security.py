@@ -101,3 +101,30 @@ def verify_refresh_token(token: str) -> dict[str, Any] | None:
     if payload and payload.get("type") == "refresh":
         return payload
     return None
+
+
+def set_refresh_cookie(response: "Response", refresh_token: str) -> None:
+    """Set refresh token as HTTP-only secure cookie."""
+    from fastapi import Response
+    
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        max_age=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,  # days to seconds
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite="lax",
+        domain=settings.COOKIE_DOMAIN,
+        path="/",
+    )
+
+
+def clear_auth_cookies(response: "Response") -> None:
+    """Clear all authentication cookies."""
+    from fastapi import Response
+    
+    response.delete_cookie(
+        key="refresh_token",
+        path="/",
+        domain=settings.COOKIE_DOMAIN,
+    )

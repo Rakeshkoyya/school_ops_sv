@@ -16,8 +16,9 @@ class User(Base, IDMixin, TimestampMixin):
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     username: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    email: Mapped[str | None] = mapped_column(String(320), unique=True, nullable=True, index=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)  # Nullable for OAuth-only users
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_super_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     evo_points: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
@@ -35,6 +36,12 @@ class User(Base, IDMixin, TimestampMixin):
         "UserRoleProject",
         back_populates="user",
         lazy="selectin",
+    )
+    oauth_accounts: Mapped[list["OAuthAccount"]] = relationship(
+        "OAuthAccount",
+        back_populates="user",
+        lazy="selectin",
+        cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:

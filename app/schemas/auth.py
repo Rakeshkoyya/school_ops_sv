@@ -45,6 +45,7 @@ class UserResponse(BaseSchema):
     id: int
     name: str
     username: str
+    email: str | None = None
     phone: str | None
     is_active: bool
     is_super_admin: bool

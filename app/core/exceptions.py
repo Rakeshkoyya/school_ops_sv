@@ -34,10 +34,10 @@ class AppException(HTTPException):
 class AuthenticationError(AppException):
     """Authentication failed."""
 
-    def __init__(self, message: str = "Authentication failed"):
+    def __init__(self, message: str = "Authentication failed", code: str = "AUTH_FAILED"):
         super().__init__(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            code="AUTH_FAILED",
+            code=code,
             message=message,
         )
 
@@ -149,6 +149,40 @@ class InternalError(AppException):
         super().__init__(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             code="INTERNAL_ERROR",
+            message=message,
+            details=details,
+        )
+
+
+class BadRequestError(AppException):
+    """Bad request - invalid input or operation."""
+
+    def __init__(
+        self,
+        message: str = "Bad request",
+        code: str = "BAD_REQUEST",
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code=code,
+            message=message,
+            details=details,
+        )
+
+
+class ConflictError(AppException):
+    """Conflict - resource already exists or state conflict."""
+
+    def __init__(
+        self,
+        message: str = "Conflict",
+        code: str = "CONFLICT",
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(
+            status_code=status.HTTP_409_CONFLICT,
+            code=code,
             message=message,
             details=details,
         )

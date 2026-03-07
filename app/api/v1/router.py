@@ -11,6 +11,7 @@ from app.api.v1.endpoints import (
     exams,
     menu_screens,
     notifications,
+    oauth,
     projects,
     roles,
     students,
@@ -26,6 +27,13 @@ api_router.include_router(
     auth.router,
     prefix="/auth",
     tags=["Authentication"],
+)
+
+# OAuth Authentication (no project context required)
+api_router.include_router(
+    oauth.router,
+    prefix="/auth",
+    tags=["OAuth"],
 )
 
 # Dashboard (project-scoped, dynamic widgets)

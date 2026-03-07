@@ -42,6 +42,15 @@ class Settings(BaseSettings):
     # Scheduler Settings (set to False in multi-worker deployments, run scheduler separately)
     ENABLE_SCHEDULER: bool = True
 
+    # Google OAuth Settings
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_REDIRECT_URI: str = "http://localhost:3000"
+
+    # Cookie Settings
+    COOKIE_DOMAIN: str | None = None  # None = same as request host
+    COOKIE_SECURE: bool = False  # Set True in production (HTTPS)
+
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def validate_database_url(cls, v: Any) -> Any:

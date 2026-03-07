@@ -6,6 +6,7 @@ from app.models.evo_point import EvoPointTransaction, EvoTransactionType
 from app.models.exam import ExamRecord
 from app.models.menu_screen import MenuScreen, MenuScreenPermission, ProjectMenuScreen
 from app.models.notification import Notification
+from app.models.oauth import OAuthAccount, OAuthProvider
 from app.models.project import Project, ProjectStatus
 from app.models.rbac import Permission, Role, RolePermission, UserRoleProject
 from app.models.student import Student
@@ -17,6 +18,9 @@ from app.models.user import User
 __all__ = [
     # User
     "User",
+    # OAuth
+    "OAuthAccount",
+    "OAuthProvider",
     # Project
     "Project",
     "ProjectStatus",
