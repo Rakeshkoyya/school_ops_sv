@@ -33,6 +33,39 @@ class TaskService:
 
     def __init__(self, db: Session):
         self.db = db
+        # Cache for project data to avoid repeated queries
+        self._project_cache: dict[int, Project] = {}
+        # Cache for evo point transactions (task_id -> amount)
+        self._evo_transaction_cache: dict[int, int | None] = {}
+
+    def _get_project_cached(self, project_id: int) -> Project | None:
+        """Get project with caching to avoid repeated queries."""
+        if project_id not in self._project_cache:
+            self._project_cache[project_id] = self.db.get(Project, project_id)
+        return self._project_cache[project_id]
+
+    def _preload_evo_transactions(self, task_ids: list[int]) -> None:
+        """Preload evo point transactions for multiple tasks in a single query."""
+        if not task_ids:
+            return
+        # Only load for tasks not already cached
+        uncached_ids = [tid for tid in task_ids if tid not in self._evo_transaction_cache]
+        if not uncached_ids:
+            return
+        
+        transactions = self.db.execute(
+            select(EvoPointTransaction.task_id, EvoPointTransaction.amount)
+            .where(
+                EvoPointTransaction.task_id.in_(uncached_ids),
+                EvoPointTransaction.transaction_type == EvoTransactionType.TASK_REWARD.value,
+            )
+        ).all()
+        
+        # Mark all as loaded (None if no transaction found)
+        for tid in uncached_ids:
+            self._evo_transaction_cache[tid] = None
+        for task_id, amount in transactions:
+            self._evo_transaction_cache[task_id] = amount
 
     # ==================== Category Methods ====================
 
@@ -273,7 +306,12 @@ class TaskService:
         )
 
         result = self.db.execute(query)
-        tasks = result.scalars().all()
+        tasks = list(result.scalars().all())
+        
+        # Preload evo point transactions for completed tasks (batch query)
+        done_task_ids = [t.id for t in tasks if t.status == TaskStatus.DONE]
+        self._preload_evo_transactions(done_task_ids)
+        
         return [self._enrich_task(t) for t in tasks]
 
     def get_my_tasks_grouped_by_category(
@@ -334,7 +372,12 @@ class TaskService:
         )
 
         result = self.db.execute(query)
-        tasks = result.scalars().all()
+        tasks = list(result.scalars().all())
+        
+        # Preload evo point transactions for completed tasks (batch query)
+        done_task_ids = [t.id for t in tasks if t.status == TaskStatus.DONE]
+        self._preload_evo_transactions(done_task_ids)
+        
         enriched_tasks = [self._enrich_task(t) for t in tasks]
 
         # Calculate counts
@@ -444,7 +487,12 @@ class TaskService:
         )
 
         result = self.db.execute(query)
-        tasks = result.scalars().all()
+        tasks = list(result.scalars().all())
+        
+        # Preload evo point transactions for completed tasks (batch query)
+        done_task_ids = [t.id for t in tasks if t.status == TaskStatus.DONE]
+        self._preload_evo_transactions(done_task_ids)
+        
         enriched = [self._enrich_task(t) for t in tasks]
         return enriched, total
 
@@ -737,8 +785,11 @@ class TaskService:
         if task.assigned_to_user_id is None:
             return None
         
-        # Look up the transaction for this task
-        # Use .value to get the lowercase string matching the DB enum
+        # Use cached transaction data if available
+        if task.id in self._evo_transaction_cache:
+            return self._evo_transaction_cache[task.id]
+        
+        # Fallback to individual query (for single task operations)
         transaction = self.db.execute(
             select(EvoPointTransaction)
             .where(
@@ -747,15 +798,16 @@ class TaskService:
             )
         ).scalar_one_or_none()
         
-        if transaction:
-            return transaction.amount
-        return None
+        amount = transaction.amount if transaction else None
+        self._evo_transaction_cache[task.id] = amount
+        return amount
 
     def _get_effective_evo_points(self, task: Task) -> int:
         """Get effective evo points for a task (task value or project default)."""
         if task.evo_points is not None:
             return task.evo_points
-        project = self.db.get(Project, task.project_id)
+        # Use cached project data
+        project = self._get_project_cached(task.project_id)
         if project:
             return project.default_evo_points
         return 0
