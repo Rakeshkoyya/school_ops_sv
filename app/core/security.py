@@ -107,13 +107,17 @@ def set_refresh_cookie(response: "Response", refresh_token: str) -> None:
     """Set refresh token as HTTP-only secure cookie."""
     from fastapi import Response
     
+    # Use "none" for cross-site cookies (requires secure=True)
+    # Use "lax" for same-site cookies (local development)
+    samesite_value = "none" if settings.COOKIE_SECURE else "lax"
+    
     response.set_cookie(
         key="refresh_token",
         value=refresh_token,
         max_age=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,  # days to seconds
         httponly=True,
         secure=settings.COOKIE_SECURE,
-        samesite="lax",
+        samesite=samesite_value,
         domain=settings.COOKIE_DOMAIN,
         path="/",
     )
