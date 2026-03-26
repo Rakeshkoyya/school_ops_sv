@@ -124,8 +124,8 @@ def upgrade() -> None:
     project_result = conn.execute(text("SELECT id FROM projects WHERE slug = 'core'"))
     core_project_id = project_result.fetchone()[0]
     
-    # 3. Create Admin user (username: admin, password: admin)
-    print("   Creating Admin user (username: admin, password: admin)...")
+    # 3. Create Admin user (username: admin, password: Admin@123)
+    print("   Creating Admin user (username: admin, password: Admin@123)...")
     password_hash = pwd_context.hash("Admin@123", rounds=12)
     conn.execute(text("""
         INSERT INTO users (name, username, password_hash, is_active, is_super_admin, evo_points, default_project_id, created_at, updated_at)

@@ -1,9 +1,11 @@
 """Project management endpoints."""
 
+import json
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -16,8 +18,10 @@ from app.schemas.project import (
     ProjectResponse,
     ProjectUpdate,
 )
+from app.schemas.project_transfer import ProjectImportResult
 from app.services.audit import AuditService
 from app.services.project import ProjectService
+from app.services.project_transfer import ProjectTransferService
 
 logger = logging.getLogger(__name__)
 
@@ -195,6 +199,95 @@ def activate_project(
     )
 
     return project
+
+
+@router.get("/{project_id}/export")
+def export_project(
+    project_id: int,
+    current_user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+    http_request: Request,
+):
+    """
+    Export all project data as a JSON file.
+    Super admin only.
+    """
+    if not current_user.is_super_admin:
+        from app.core.exceptions import PermissionDeniedError
+        raise PermissionDeniedError("Super admin access required")
+
+    service = ProjectTransferService(db)
+    export_data = service.export_project(project_id)
+
+    slug = export_data.get("project", {}).get("slug", "project")
+    content = json.dumps(export_data, indent=2, default=str)
+
+    # Audit log
+    audit = AuditService(db)
+    audit.log(
+        action=AuditAction.PROJECT_UPDATED,
+        resource_type="project",
+        resource_id=str(project_id),
+        user_id=current_user.id,
+        description=f"Project '{slug}' exported",
+        ip_address=http_request.client.host if http_request.client else None,
+    )
+
+    return Response(
+        content=content,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="{slug}_export.json"'
+        },
+    )
+
+
+@router.post("/import", response_model=ProjectImportResult)
+def import_project(
+    file: UploadFile,
+    current_user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+    http_request: Request,
+):
+    """
+    Import a project from an exported JSON file.
+    Super admin only. Creates a new project with all associated data.
+    """
+    if not current_user.is_super_admin:
+        from app.core.exceptions import PermissionDeniedError
+        raise PermissionDeniedError("Super admin access required")
+
+    if not file.filename or not file.filename.endswith(".json"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only .json files are accepted",
+        )
+
+    try:
+        raw = file.file.read()
+        data = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid JSON file: {exc}",
+        )
+
+    service = ProjectTransferService(db)
+    result = service.import_project(data)
+
+    # Audit log
+    audit = AuditService(db)
+    audit.log(
+        action=AuditAction.PROJECT_CREATED,
+        resource_type="project",
+        resource_id=str(result.project_id),
+        project_id=result.project_id,
+        user_id=current_user.id,
+        description=f"Project '{result.project_name}' imported from file",
+        ip_address=http_request.client.host if http_request.client else None,
+    )
+
+    return result
 
 
 @router.delete("/{project_id}", response_model=MessageResponse)
