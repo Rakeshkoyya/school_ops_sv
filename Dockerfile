@@ -39,11 +39,11 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
 # Production defaults (can override via docker run -e or docker-compose)
-ENV PORT=8000
+ENV PORT=8080
 ENV WORKERS=2
 
 # Expose port
-EXPOSE 8000
+EXPOSE 8080
 
 # Start uvicorn with shell for variable expansion
-CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${WORKERS:-2}"]
+CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080} --workers ${WORKERS:-2}"]
