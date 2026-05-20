@@ -3,7 +3,7 @@ from datetime import date, datetime
 from sqlalchemy import select, cast, Date as SQLDate
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.holiday import ProjectHoliday
+from app.models.holiday import ProjectHoliday, UserLeave
 from app.models.task import Task, TaskStatus
 from app.core.exceptions import DuplicateResourceError
 from app.schemas.holiday import ProjectHolidayCreate, ProjectHolidayResponse
@@ -221,3 +221,73 @@ class HolidayService:
         await self.db.delete(holiday)
         await self.db.commit()
         return True
+
+
+class UserLeaveService:
+    """Service for managing user leaves."""
+    
+    def __init__(self, db: AsyncSession):
+        self.db = db
+    
+    async def is_user_on_leave(
+        self, project_id: int, user_id: int, check_date: date
+    ) -> bool:
+        """
+        Check if a user is on leave on a specific date.
+        
+        Args:
+            project_id: The project ID
+            user_id: The user ID
+            check_date: The date to check
+            
+        Returns:
+            True if user is on leave, False otherwise
+        """
+        result = await self.db.execute(
+            select(UserLeave)
+            .where(
+                UserLeave.project_id == project_id,
+                UserLeave.user_id == user_id,
+                UserLeave.leave_date == check_date,
+            )
+        )
+        leave = result.scalar_one_or_none()
+        return leave is not None
+    
+    async def cancel_user_tasks_for_date(
+        self, project_id: int, user_id: int, target_date: date
+    ) -> int:
+        """
+        Cancel pending recurring tasks for a specific user on a date.
+        
+        Args:
+            project_id: The project ID
+            user_id: The user ID
+            target_date: The date to cancel tasks for
+            
+        Returns:
+            Number of tasks cancelled
+        """
+        # Find user's pending recurring tasks for target_date
+        result = await self.db.execute(
+            select(Task)
+            .where(
+                Task.project_id == project_id,
+                Task.assigned_to_user_id == user_id,
+                Task.status == TaskStatus.PENDING,
+                Task.recurring_template_id.isnot(None),
+                cast(Task.created_at, SQLDate) == target_date,
+            )
+        )
+        tasks = result.scalars().all()
+        
+        # Cancel them
+        count = 0
+        for task in tasks:
+            task.status = TaskStatus.CANCELLED
+            count += 1
+        
+        if count > 0:
+            await self.db.commit()
+        
+        return count
