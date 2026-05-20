@@ -1,6 +1,7 @@
 """Recurring task template service."""
 
 from datetime import date, datetime, time, timezone, timedelta
+from collections import defaultdict
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.sql import cast
@@ -25,6 +26,7 @@ from app.schemas.recurring_task import (
     RecurringTaskTemplateUpdate,
     RecurringTaskTemplateWithDetails,
 )
+from app.services.holiday import HolidayService, UserLeaveService
 
 
 WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -214,9 +216,16 @@ class RecurringTaskService:
         """
         Generate all recurring tasks for a given date.
         Called by scheduler at midnight.
+        Skips task generation for:
+        - Projects marked as holiday
+        - Users on leave (only for user-assigned tasks)
         """
         target_date = target_date or date.today()
         generated_count = 0
+
+        # Initialize holiday and leave services
+        holiday_service = HolidayService(self.db)
+        leave_service = UserLeaveService(self.db)
 
         # Get all active templates that haven't been generated for this date
         query = (
@@ -237,8 +246,32 @@ class RecurringTaskService:
         result = self.db.execute(query)
         templates = result.scalars().all()
 
+        # Group templates by project_id for efficient holiday checking
+        templates_by_project = defaultdict(list)
         for template in templates:
-            if self._should_generate_for_date(template, target_date):
+            templates_by_project[template.project_id].append(template)
+
+        # Process each project
+        for project_id, project_templates in templates_by_project.items():
+            # Check if it's a project-wide holiday
+            if holiday_service.is_holiday(project_id, target_date):
+                # Skip all templates for this project
+                continue
+
+            # Process each template in the project
+            for template in project_templates:
+                if not self._should_generate_for_date(template, target_date):
+                    continue
+
+                # Check user leave for user-assigned tasks (skip role-assigned tasks)
+                if template.assigned_to_user_id:
+                    if leave_service.is_user_on_leave(
+                        project_id, template.assigned_to_user_id, target_date
+                    ):
+                        # Skip this template - user is on leave
+                        continue
+
+                # Generate the task
                 task = self._generate_task_from_template(template, target_date)
                 if task:  # Only count if task was actually created (not duplicate)
                     template.last_generated_date = target_date

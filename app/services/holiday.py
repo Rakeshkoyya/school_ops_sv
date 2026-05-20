@@ -1,7 +1,7 @@
 """Service for managing project holidays."""
 from datetime import date, datetime
 from sqlalchemy import select, cast, Date as SQLDate
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.models.holiday import ProjectHoliday, UserLeave
 from app.models.task import Task, TaskStatus
@@ -17,10 +17,10 @@ from app.schemas.holiday import (
 class HolidayService:
     """Service for managing project holidays."""
     
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: Session):
         self.db = db
     
-    async def is_holiday(self, project_id: int, check_date: date) -> bool:
+    def is_holiday(self, project_id: int, check_date: date) -> bool:
         """
         Check if a specific date is marked as a holiday for the project.
         
@@ -31,7 +31,7 @@ class HolidayService:
         Returns:
             True if the date is a holiday, False otherwise
         """
-        result = await self.db.execute(
+        result = self.db.execute(
             select(ProjectHoliday)
             .where(
                 ProjectHoliday.project_id == project_id,
@@ -41,7 +41,7 @@ class HolidayService:
         holiday = result.scalar_one_or_none()
         return holiday is not None
     
-    async def cancel_recurring_tasks_for_date(
+    def cancel_recurring_tasks_for_date(
         self, project_id: int, target_date: date
     ) -> int:
         """
@@ -55,7 +55,7 @@ class HolidayService:
             Number of tasks cancelled
         """
         # Find pending recurring tasks created on target_date
-        result = await self.db.execute(
+        result = self.db.execute(
             select(Task)
             .where(
                 Task.project_id == project_id,
@@ -73,11 +73,11 @@ class HolidayService:
             count += 1
         
         if count > 0:
-            await self.db.commit()
+            self.db.commit()
         
         return count
     
-    async def create_holiday(
+    def create_holiday(
         self,
         project_id: int,
         holiday_data: ProjectHolidayCreate,
@@ -100,7 +100,7 @@ class HolidayService:
             DuplicateResourceError: If holiday already exists for this date
         """
         # Check for duplicate
-        existing = await self.db.execute(
+        existing = self.db.execute(
             select(ProjectHoliday)
             .where(
                 ProjectHoliday.project_id == project_id,
@@ -119,13 +119,13 @@ class HolidayService:
             created_by_id=created_by_id,
         )
         self.db.add(holiday)
-        await self.db.commit()
-        await self.db.refresh(holiday)
+        self.db.commit()
+        self.db.refresh(holiday)
         
         # Cancel tasks if past or today
         tasks_cancelled = 0
         if holiday_data.holiday_date <= date.today():
-            tasks_cancelled = await self.cancel_recurring_tasks_for_date(
+            tasks_cancelled = self.cancel_recurring_tasks_for_date(
                 project_id, holiday_data.holiday_date
             )
         
@@ -141,7 +141,7 @@ class HolidayService:
             tasks_cancelled=tasks_cancelled,
         )
     
-    async def list_holidays(
+    def list_holidays(
         self,
         project_id: int,
         year: int | None = None,
@@ -180,7 +180,7 @@ class HolidayService:
         
         query = query.order_by(ProjectHoliday.holiday_date)
         
-        result = await self.db.execute(query)
+        result = self.db.execute(query)
         holidays = result.scalars().all()
         
         return [
@@ -198,7 +198,7 @@ class HolidayService:
             for h in holidays
         ]
     
-    async def delete_holiday(self, project_id: int, holiday_id: int) -> bool:
+    def delete_holiday(self, project_id: int, holiday_id: int) -> bool:
         """
         Delete a holiday.
         
@@ -211,7 +211,7 @@ class HolidayService:
         Returns:
             True if deleted, False if not found
         """
-        result = await self.db.execute(
+        result = self.db.execute(
             select(ProjectHoliday)
             .where(
                 ProjectHoliday.id == holiday_id,
@@ -223,18 +223,18 @@ class HolidayService:
         if not holiday:
             return False
         
-        await self.db.delete(holiday)
-        await self.db.commit()
+        self.db.delete(holiday)
+        self.db.commit()
         return True
 
 
 class UserLeaveService:
     """Service for managing user leaves."""
     
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: Session):
         self.db = db
     
-    async def is_user_on_leave(
+    def is_user_on_leave(
         self, project_id: int, user_id: int, check_date: date
     ) -> bool:
         """
@@ -248,7 +248,7 @@ class UserLeaveService:
         Returns:
             True if user is on leave, False otherwise
         """
-        result = await self.db.execute(
+        result = self.db.execute(
             select(UserLeave)
             .where(
                 UserLeave.project_id == project_id,
@@ -259,7 +259,7 @@ class UserLeaveService:
         leave = result.scalar_one_or_none()
         return leave is not None
     
-    async def cancel_user_tasks_for_date(
+    def cancel_user_tasks_for_date(
         self, project_id: int, user_id: int, target_date: date
     ) -> int:
         """
@@ -274,7 +274,7 @@ class UserLeaveService:
             Number of tasks cancelled
         """
         # Find user's pending recurring tasks for target_date
-        result = await self.db.execute(
+        result = self.db.execute(
             select(Task)
             .where(
                 Task.project_id == project_id,
@@ -293,11 +293,11 @@ class UserLeaveService:
             count += 1
         
         if count > 0:
-            await self.db.commit()
+            self.db.commit()
         
         return count
     
-    async def create_leave(
+    def create_leave(
         self,
         project_id: int,
         leave_data: UserLeaveCreate,
@@ -320,7 +320,7 @@ class UserLeaveService:
             DuplicateResourceError: If leave already exists for this user/date
         """
         # Check for duplicate
-        existing = await self.db.execute(
+        existing = self.db.execute(
             select(UserLeave)
             .where(
                 UserLeave.project_id == project_id,
@@ -341,13 +341,13 @@ class UserLeaveService:
             created_by_id=created_by_id,
         )
         self.db.add(leave)
-        await self.db.commit()
-        await self.db.refresh(leave)
+        self.db.commit()
+        self.db.refresh(leave)
         
         # Cancel user's tasks if past or today
         tasks_cancelled = 0
         if leave_data.leave_date <= date.today():
-            tasks_cancelled = await self.cancel_user_tasks_for_date(
+            tasks_cancelled = self.cancel_user_tasks_for_date(
                 project_id, leave_data.user_id, leave_data.leave_date
             )
         
@@ -364,7 +364,7 @@ class UserLeaveService:
             tasks_cancelled=tasks_cancelled,
         )
     
-    async def list_leaves(
+    def list_leaves(
         self,
         project_id: int,
         user_id: int | None = None,
@@ -408,7 +408,7 @@ class UserLeaveService:
         
         query = query.order_by(UserLeave.leave_date)
         
-        result = await self.db.execute(query)
+        result = self.db.execute(query)
         leaves = result.scalars().all()
         
         return [
@@ -427,7 +427,7 @@ class UserLeaveService:
             for l in leaves
         ]
     
-    async def delete_leave(self, project_id: int, leave_id: int) -> bool:
+    def delete_leave(self, project_id: int, leave_id: int) -> bool:
         """
         Delete a user leave.
         
@@ -440,7 +440,7 @@ class UserLeaveService:
         Returns:
             True if deleted, False if not found
         """
-        result = await self.db.execute(
+        result = self.db.execute(
             select(UserLeave)
             .where(
                 UserLeave.id == leave_id,
@@ -452,6 +452,6 @@ class UserLeaveService:
         if not leave:
             return False
         
-        await self.db.delete(leave)
-        await self.db.commit()
+        self.db.delete(leave)
+        self.db.commit()
         return True
