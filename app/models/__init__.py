@@ -14,6 +14,7 @@ from app.models.task import EvoReductionType, RecurrenceType, RecurringTaskTempl
 from app.models.task_view import TaskViewStyle, UserTaskViewPreference, TASK_COLUMNS, get_default_column_config
 from app.models.upload import Upload, UploadError, UploadStatus, UploadType
 from app.models.user import User
+from app.models.holiday import ProjectHoliday, UserLeave
 
 __all__ = [
     # User
@@ -65,4 +66,7 @@ __all__ = [
     "MenuScreen",
     "MenuScreenPermission",
     "ProjectMenuScreen",
+    # Holiday and Leave
+    "ProjectHoliday",
+    "UserLeave",
 ]
