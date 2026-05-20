@@ -9,6 +9,7 @@ from app.api.v1.endpoints import (
     dashboard,
     evo_points,
     exams,
+    holidays,
     menu_screens,
     notifications,
     oauth,
@@ -83,6 +84,13 @@ api_router.include_router(
     task_views.router,
     prefix="/task-views",
     tags=["Task Views"],
+)
+
+# Holidays and Leaves (project-scoped)
+api_router.include_router(
+    holidays.router,
+    prefix="/holidays",
+    tags=["Holidays & Leaves"],
 )
 
 # Attendance (project-scoped)
