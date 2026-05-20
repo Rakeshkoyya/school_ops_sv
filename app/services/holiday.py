@@ -6,7 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.holiday import ProjectHoliday, UserLeave
 from app.models.task import Task, TaskStatus
 from app.core.exceptions import DuplicateResourceError
-from app.schemas.holiday import ProjectHolidayCreate, ProjectHolidayResponse
+from app.schemas.holiday import (
+    ProjectHolidayCreate,
+    ProjectHolidayResponse,
+    UserLeaveCreate,
+    UserLeaveResponse,
+)
 
 
 class HolidayService:
@@ -291,3 +296,162 @@ class UserLeaveService:
             await self.db.commit()
         
         return count
+    
+    async def create_leave(
+        self,
+        project_id: int,
+        leave_data: UserLeaveCreate,
+        created_by_id: int,
+    ) -> UserLeaveResponse:
+        """
+        Create a new user leave.
+        
+        If the date is today or in the past, cancels user's pending recurring tasks.
+        
+        Args:
+            project_id: The project ID
+            leave_data: Leave creation data
+            created_by_id: ID of user creating the leave
+            
+        Returns:
+            Created leave with tasks_cancelled count
+            
+        Raises:
+            DuplicateResourceError: If leave already exists for this user/date
+        """
+        # Check for duplicate
+        existing = await self.db.execute(
+            select(UserLeave)
+            .where(
+                UserLeave.project_id == project_id,
+                UserLeave.user_id == leave_data.user_id,
+                UserLeave.leave_date == leave_data.leave_date,
+            )
+        )
+        if existing.scalar_one_or_none():
+            raise DuplicateResourceError("Leave already exists for this user and date")
+        
+        # Create leave
+        leave = UserLeave(
+            project_id=project_id,
+            user_id=leave_data.user_id,
+            leave_date=leave_data.leave_date,
+            reason=leave_data.reason,
+            notes=leave_data.notes,
+            created_by_id=created_by_id,
+        )
+        self.db.add(leave)
+        await self.db.commit()
+        await self.db.refresh(leave)
+        
+        # Cancel user's tasks if past or today
+        tasks_cancelled = 0
+        if leave_data.leave_date <= date.today():
+            tasks_cancelled = await self.cancel_user_tasks_for_date(
+                project_id, leave_data.user_id, leave_data.leave_date
+            )
+        
+        return UserLeaveResponse(
+            id=leave.id,
+            project_id=leave.project_id,
+            user_id=leave.user_id,
+            leave_date=leave.leave_date,
+            reason=leave.reason,
+            notes=leave.notes,
+            created_by_id=leave.created_by_id,
+            created_at=leave.created_at.date(),
+            updated_at=leave.updated_at.date(),
+            tasks_cancelled=tasks_cancelled,
+        )
+    
+    async def list_leaves(
+        self,
+        project_id: int,
+        user_id: int | None = None,
+        year: int | None = None,
+        month: int | None = None,
+    ) -> list[UserLeaveResponse]:
+        """
+        List user leaves with optional filters.
+        
+        Args:
+            project_id: The project ID
+            user_id: Optional user filter
+            year: Optional year filter
+            month: Optional month filter (1-12)
+            
+        Returns:
+            List of user leaves
+        """
+        query = select(UserLeave).where(
+            UserLeave.project_id == project_id
+        )
+        
+        if user_id:
+            query = query.where(UserLeave.user_id == user_id)
+        
+        if year and month:
+            start_date = date(year, month, 1)
+            if month == 12:
+                end_date = date(year + 1, 1, 1)
+            else:
+                end_date = date(year, month + 1, 1)
+            query = query.where(
+                UserLeave.leave_date >= start_date,
+                UserLeave.leave_date < end_date,
+            )
+        elif year:
+            query = query.where(
+                UserLeave.leave_date >= date(year, 1, 1),
+                UserLeave.leave_date < date(year + 1, 1, 1),
+            )
+        
+        query = query.order_by(UserLeave.leave_date)
+        
+        result = await self.db.execute(query)
+        leaves = result.scalars().all()
+        
+        return [
+            UserLeaveResponse(
+                id=l.id,
+                project_id=l.project_id,
+                user_id=l.user_id,
+                leave_date=l.leave_date,
+                reason=l.reason,
+                notes=l.notes,
+                created_by_id=l.created_by_id,
+                created_at=l.created_at.date(),
+                updated_at=l.updated_at.date(),
+                tasks_cancelled=None,
+            )
+            for l in leaves
+        ]
+    
+    async def delete_leave(self, project_id: int, leave_id: int) -> bool:
+        """
+        Delete a user leave.
+        
+        Note: Does not restore cancelled tasks.
+        
+        Args:
+            project_id: The project ID
+            leave_id: The leave ID
+            
+        Returns:
+            True if deleted, False if not found
+        """
+        result = await self.db.execute(
+            select(UserLeave)
+            .where(
+                UserLeave.id == leave_id,
+                UserLeave.project_id == project_id,
+            )
+        )
+        leave = result.scalar_one_or_none()
+        
+        if not leave:
+            return False
+        
+        await self.db.delete(leave)
+        await self.db.commit()
+        return True
