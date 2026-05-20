@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models.holiday import ProjectHoliday, UserLeave
 from app.models.task import Task, TaskStatus
-from app.core.exceptions import DuplicateResourceError
+from app.core.exceptions import ConflictError
 from app.schemas.holiday import (
     ProjectHolidayCreate,
     ProjectHolidayResponse,
@@ -97,7 +97,7 @@ class HolidayService:
             Created holiday with tasks_cancelled count
             
         Raises:
-            DuplicateResourceError: If holiday already exists for this date
+            ConflictError: If holiday already exists for this date
         """
         # Check for duplicate
         existing = self.db.execute(
@@ -108,7 +108,7 @@ class HolidayService:
             )
         )
         if existing.scalar_one_or_none():
-            raise DuplicateResourceError("Holiday already exists for this date")
+            raise ConflictError("Holiday already exists for this date")
         
         # Create holiday
         holiday = ProjectHoliday(
@@ -317,7 +317,7 @@ class UserLeaveService:
             Created leave with tasks_cancelled count
             
         Raises:
-            DuplicateResourceError: If leave already exists for this user/date
+            ConflictError: If leave already exists for this user/date
         """
         # Check for duplicate
         existing = self.db.execute(
@@ -329,7 +329,7 @@ class UserLeaveService:
             )
         )
         if existing.scalar_one_or_none():
-            raise DuplicateResourceError("Leave already exists for this user and date")
+            raise ConflictError("Leave already exists for this user and date")
         
         # Create leave
         leave = UserLeave(

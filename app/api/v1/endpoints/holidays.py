@@ -11,7 +11,6 @@ from app.core.dependencies import (
     get_project_context,
     require_project_admin,
 )
-from app.core.exceptions import DuplicateResourceError
 from app.schemas.common import MessageResponse
 from app.schemas.holiday import (
     ProjectHolidayCreate,
@@ -64,17 +63,11 @@ def create_holiday(
     all pending recurring tasks for that date.
     """
     service = HolidayService(db)
-    try:
-        return service.create_holiday(
-            project_id=context.project_id,
-            holiday_data=request,
-            created_by_id=context.user_id,
-        )
-    except DuplicateResourceError as e:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=str(e),
-        )
+    return service.create_holiday(
+        project_id=context.project_id,
+        holiday_data=request,
+        created_by_id=context.user_id,
+    )
 
 
 @router.delete("/holidays/{holiday_id}", response_model=MessageResponse)
@@ -148,17 +141,11 @@ def create_leave(
     the user's pending recurring tasks for that date.
     """
     service = UserLeaveService(db)
-    try:
-        return service.create_leave(
-            project_id=context.project_id,
-            leave_data=request,
-            created_by_id=context.user_id,
-        )
-    except DuplicateResourceError as e:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=str(e),
-        )
+    return service.create_leave(
+        project_id=context.project_id,
+        leave_data=request,
+        created_by_id=context.user_id,
+    )
 
 
 @router.delete("/leaves/{leave_id}", response_model=MessageResponse)
