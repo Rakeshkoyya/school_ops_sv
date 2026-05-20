@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.holiday import ProjectHoliday
 from app.models.task import Task, TaskStatus
 from app.core.exceptions import DuplicateResourceError
+from app.schemas.holiday import ProjectHolidayCreate, ProjectHolidayResponse
 
 
 class HolidayService:
@@ -70,3 +71,153 @@ class HolidayService:
             await self.db.commit()
         
         return count
+    
+    async def create_holiday(
+        self,
+        project_id: int,
+        holiday_data: ProjectHolidayCreate,
+        created_by_id: int,
+    ) -> ProjectHolidayResponse:
+        """
+        Create a new project holiday.
+        
+        If the date is today or in the past, cancels pending recurring tasks.
+        
+        Args:
+            project_id: The project ID
+            holiday_data: Holiday creation data
+            created_by_id: ID of user creating the holiday
+            
+        Returns:
+            Created holiday with tasks_cancelled count
+            
+        Raises:
+            DuplicateResourceError: If holiday already exists for this date
+        """
+        # Check for duplicate
+        existing = await self.db.execute(
+            select(ProjectHoliday)
+            .where(
+                ProjectHoliday.project_id == project_id,
+                ProjectHoliday.holiday_date == holiday_data.holiday_date,
+            )
+        )
+        if existing.scalar_one_or_none():
+            raise DuplicateResourceError("Holiday already exists for this date")
+        
+        # Create holiday
+        holiday = ProjectHoliday(
+            project_id=project_id,
+            holiday_date=holiday_data.holiday_date,
+            name=holiday_data.name,
+            description=holiday_data.description,
+            created_by_id=created_by_id,
+        )
+        self.db.add(holiday)
+        await self.db.commit()
+        await self.db.refresh(holiday)
+        
+        # Cancel tasks if past or today
+        tasks_cancelled = 0
+        if holiday_data.holiday_date <= date.today():
+            tasks_cancelled = await self.cancel_recurring_tasks_for_date(
+                project_id, holiday_data.holiday_date
+            )
+        
+        return ProjectHolidayResponse(
+            id=holiday.id,
+            project_id=holiday.project_id,
+            holiday_date=holiday.holiday_date,
+            name=holiday.name,
+            description=holiday.description,
+            created_by_id=holiday.created_by_id,
+            created_at=holiday.created_at.date(),
+            updated_at=holiday.updated_at.date(),
+            tasks_cancelled=tasks_cancelled,
+        )
+    
+    async def list_holidays(
+        self,
+        project_id: int,
+        year: int | None = None,
+        month: int | None = None,
+    ) -> list[ProjectHolidayResponse]:
+        """
+        List holidays for a project with optional filters.
+        
+        Args:
+            project_id: The project ID
+            year: Optional year filter
+            month: Optional month filter (1-12)
+            
+        Returns:
+            List of holidays
+        """
+        query = select(ProjectHoliday).where(
+            ProjectHoliday.project_id == project_id
+        )
+        
+        if year and month:
+            start_date = date(year, month, 1)
+            if month == 12:
+                end_date = date(year + 1, 1, 1)
+            else:
+                end_date = date(year, month + 1, 1)
+            query = query.where(
+                ProjectHoliday.holiday_date >= start_date,
+                ProjectHoliday.holiday_date < end_date,
+            )
+        elif year:
+            query = query.where(
+                ProjectHoliday.holiday_date >= date(year, 1, 1),
+                ProjectHoliday.holiday_date < date(year + 1, 1, 1),
+            )
+        
+        query = query.order_by(ProjectHoliday.holiday_date)
+        
+        result = await self.db.execute(query)
+        holidays = result.scalars().all()
+        
+        return [
+            ProjectHolidayResponse(
+                id=h.id,
+                project_id=h.project_id,
+                holiday_date=h.holiday_date,
+                name=h.name,
+                description=h.description,
+                created_by_id=h.created_by_id,
+                created_at=h.created_at.date(),
+                updated_at=h.updated_at.date(),
+                tasks_cancelled=None,
+            )
+            for h in holidays
+        ]
+    
+    async def delete_holiday(self, project_id: int, holiday_id: int) -> bool:
+        """
+        Delete a holiday.
+        
+        Note: Does not restore cancelled tasks.
+        
+        Args:
+            project_id: The project ID
+            holiday_id: The holiday ID
+            
+        Returns:
+            True if deleted, False if not found
+        """
+        result = await self.db.execute(
+            select(ProjectHoliday)
+            .where(
+                ProjectHoliday.id == holiday_id,
+                ProjectHoliday.project_id == project_id,
+            )
+        )
+        holiday = result.scalar_one_or_none()
+        
+        if not holiday:
+            return False
+        
+        await self.db.delete(holiday)
+        await self.db.commit()
+        return True
