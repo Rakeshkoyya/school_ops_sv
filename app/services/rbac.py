@@ -132,8 +132,13 @@ class RBACService:
         self,
         project_id: int,
         request: RoleCreate,
+        skip_validation: bool = False,
     ) -> RoleWithPermissions:
-        """Create a new role for a project."""
+        """Create a new role for a project.
+        
+        Args:
+            skip_validation: If True, skip menu allocation validation (for super admin).
+        """
         # Check if role name exists in project
         result = self.db.execute(
             select(Role).where(
@@ -170,7 +175,7 @@ class RBACService:
         # Validate permissions are available for this project's allocated menus
         if permission_ids_to_assign:
             permission_ids_to_assign = self._validate_permissions_for_project(
-                project_id, permission_ids_to_assign
+                project_id, permission_ids_to_assign, skip_validation=skip_validation
             )
 
         # Assign permissions
@@ -292,8 +297,13 @@ class RBACService:
         role_id: int,
         project_id: int,
         request: RoleUpdate,
+        skip_validation: bool = False,
     ) -> RoleResponse:
-        """Update a role."""
+        """Update a role.
+        
+        Args:
+            skip_validation: If True, skip menu allocation validation (for super admin).
+        """
         role = self.get_role(role_id, project_id)
 
         update_data = request.model_dump(exclude_unset=True)
@@ -331,7 +341,7 @@ class RBACService:
             # Validate permissions are available for this project's allocated menus
             if permission_ids:
                 permission_ids = self._validate_permissions_for_project(
-                    project_id, permission_ids
+                    project_id, permission_ids, skip_validation=skip_validation
                 )
             
             # Remove existing permissions

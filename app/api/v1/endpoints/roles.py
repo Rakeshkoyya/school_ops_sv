@@ -91,7 +91,7 @@ def create_role_admin(
         raise PermissionDeniedError("project_id is required for super admin role creation")
     
     service = RBACService(db)
-    role = service.create_role(request.project_id, request)
+    role = service.create_role(request.project_id, request, skip_validation=True)
 
     # Audit log
     audit = AuditService(db)
@@ -200,7 +200,7 @@ def update_role_admin(
         raise PermissionDeniedError("project_id is required for super admin role update")
     
     service = RBACService(db)
-    role = service.update_role(role_id, request.project_id, request)
+    role = service.update_role(role_id, request.project_id, request, skip_validation=True)
 
     # Audit log
     audit = AuditService(db)
