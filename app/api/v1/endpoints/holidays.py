@@ -9,6 +9,7 @@ from app.core.database import get_db
 from app.core.dependencies import (
     CurrentUserContext,
     get_project_context,
+    require_permission,
     require_project_admin,
 )
 from app.schemas.common import MessageResponse
@@ -28,13 +29,15 @@ router = APIRouter()
 
 @router.get("/holidays", response_model=list[ProjectHolidayResponse])
 def list_holidays(
-    context: Annotated[CurrentUserContext, Depends(get_project_context)],
+    context: Annotated[CurrentUserContext, Depends(require_permission("holiday:view"))],
     db: Annotated[Session, Depends(get_db)],
     year: int | None = Query(None, description="Filter by year"),
     month: int | None = Query(None, description="Filter by month (1-12)"),
 ):
     """
     List all holidays for the project.
+    
+    Requires holiday:view permission.
     
     Optional filters:
     - year: Filter holidays for a specific year
@@ -51,13 +54,13 @@ def list_holidays(
 @router.post("/holidays", response_model=ProjectHolidayResponse)
 def create_holiday(
     request: ProjectHolidayCreate,
-    context: Annotated[CurrentUserContext, Depends(require_project_admin())],
+    context: Annotated[CurrentUserContext, Depends(require_permission("holiday:create"))],
     db: Annotated[Session, Depends(get_db)],
 ):
     """
     Create a new project holiday.
     
-    Requires project admin role.
+    Requires holiday:create permission.
     
     If the holiday date is today or in the past, automatically cancels
     all pending recurring tasks for that date.
@@ -73,13 +76,13 @@ def create_holiday(
 @router.delete("/holidays/{holiday_id}", response_model=MessageResponse)
 def delete_holiday(
     holiday_id: int,
-    context: Annotated[CurrentUserContext, Depends(require_project_admin())],
+    context: Annotated[CurrentUserContext, Depends(require_permission("holiday:delete"))],
     db: Annotated[Session, Depends(get_db)],
 ):
     """
     Delete a holiday.
     
-    Requires project admin role.
+    Requires holiday:delete permission.
     
     Note: Does not restore previously cancelled tasks.
     """
@@ -103,7 +106,7 @@ def delete_holiday(
 
 @router.get("/leaves", response_model=list[UserLeaveResponse])
 def list_leaves(
-    context: Annotated[CurrentUserContext, Depends(get_project_context)],
+    context: Annotated[CurrentUserContext, Depends(require_permission("holiday:view"))],
     db: Annotated[Session, Depends(get_db)],
     user_id: int | None = Query(None, description="Filter by user ID"),
     year: int | None = Query(None, description="Filter by year"),
@@ -111,6 +114,8 @@ def list_leaves(
 ):
     """
     List user leaves for the project.
+    
+    Requires holiday:view permission.
     
     Optional filters:
     - user_id: Filter leaves for a specific user
@@ -129,13 +134,13 @@ def list_leaves(
 @router.post("/leaves", response_model=UserLeaveResponse)
 def create_leave(
     request: UserLeaveCreate,
-    context: Annotated[CurrentUserContext, Depends(require_project_admin())],
+    context: Annotated[CurrentUserContext, Depends(require_permission("holiday:create"))],
     db: Annotated[Session, Depends(get_db)],
 ):
     """
     Create a new user leave.
     
-    Requires project admin role.
+    Requires holiday:create permission.
     
     If the leave date is today or in the past, automatically cancels
     the user's pending recurring tasks for that date.
@@ -151,13 +156,13 @@ def create_leave(
 @router.delete("/leaves/{leave_id}", response_model=MessageResponse)
 def delete_leave(
     leave_id: int,
-    context: Annotated[CurrentUserContext, Depends(require_project_admin())],
+    context: Annotated[CurrentUserContext, Depends(require_permission("holiday:delete"))],
     db: Annotated[Session, Depends(get_db)],
 ):
     """
     Delete a user leave.
     
-    Requires project admin role.
+    Requires holiday:delete permission.
     
     Note: Does not restore previously cancelled tasks.
     """
