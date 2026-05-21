@@ -61,6 +61,16 @@ class Project(Base, IDMixin, TimestampMixin):
         lazy="selectin",
         passive_deletes=True,
     )
+    holidays: Mapped[list["ProjectHoliday"]] = relationship(
+        "ProjectHoliday",
+        back_populates="project",
+        passive_deletes=True,
+    )
+    user_leaves: Mapped[list["UserLeave"]] = relationship(
+        "UserLeave",
+        back_populates="project",
+        passive_deletes=True,
+    )
 
     def __repr__(self) -> str:
         return f"<Project(id={self.id}, name={self.name})>"

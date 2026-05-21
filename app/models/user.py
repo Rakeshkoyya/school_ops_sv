@@ -43,6 +43,12 @@ class User(Base, IDMixin, TimestampMixin):
         lazy="selectin",
         cascade="all, delete-orphan",
     )
+    leaves: Mapped[list["UserLeave"]] = relationship(
+        "UserLeave",
+        foreign_keys="UserLeave.user_id",
+        back_populates="user",
+        passive_deletes=True,
+    )
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, username={self.username})>"
