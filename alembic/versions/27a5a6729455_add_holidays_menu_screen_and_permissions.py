@@ -91,8 +91,20 @@ def upgrade() -> None:
                 ON CONFLICT DO NOTHING
             """), {"menu_id": menu_id, "perm_id": perm_id})
 
+    # 6. Allocate menu to all existing projects
+    print("   Allocating Holidays & Leaves menu to all existing projects...")
+    conn.execute(text("""
+        INSERT INTO project_menu_screens (project_id, menu_screen_id, created_at)
+        SELECT p.id, :menu_id, :now
+        FROM projects p
+        WHERE NOT EXISTS (
+            SELECT 1 FROM project_menu_screens pms 
+            WHERE pms.project_id = p.id AND pms.menu_screen_id = :menu_id
+        )
+    """), {"menu_id": menu_id, "now": now})
+
     print("✅ Holidays menu screen setup complete!")
-    print("   Note: Super Admin must allocate this menu to projects for it to appear in sidebars.")
+    print("   Menu has been automatically allocated to all existing projects.")
 
 
 def downgrade() -> None:
